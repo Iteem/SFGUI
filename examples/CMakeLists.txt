@@ -38,6 +38,7 @@ build_example( "ProgressBar" "ProgressBar.cpp" )
 build_example( "SpinButton" "SpinButton.cpp" )
 build_example( "Canvas" "Canvas.cpp" )
 build_example( "test" "Test.cpp" )
+build_example( "Bob" "Bob.cpp" )
 
 # Copy data directory to build cache directory to be able to run examples from
 # there. Useful for testing stuff.
