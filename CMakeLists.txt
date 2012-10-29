@@ -77,6 +77,7 @@ set(
 	${INC_DIR}/SFGUI/Engine.inl
     ${INC_DIR}/SFGUI/Engines/Bob.hpp
     ${INC_DIR}/SFGUI/Engines/Bob/Spritebox.hpp
+	${INC_DIR}/SFGUI/Engines/Bob/TextureManager.hpp
 	${INC_DIR}/SFGUI/Engines/BREW.hpp
 	${INC_DIR}/SFGUI/Entry.hpp
 	${INC_DIR}/SFGUI/FastDelegate.hpp
@@ -150,6 +151,7 @@ set(
 	${SRC_DIR}/SFGUI/Engines/Bob/SpinButton.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/Spritebox.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/ToggleButton.cpp
+	${SRC_DIR}/SFGUI/Engines/Bob/TextureManager.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/Window.cpp
 	${SRC_DIR}/SFGUI/Engines/BREW.cpp
 	${SRC_DIR}/SFGUI/Engines/BREW/Button.cpp
