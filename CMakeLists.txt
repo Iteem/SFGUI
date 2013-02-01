@@ -76,7 +76,6 @@ set(
 	${INC_DIR}/SFGUI/Engine.hpp
 	${INC_DIR}/SFGUI/Engine.inl
     ${INC_DIR}/SFGUI/Engines/Bob.hpp
-    ${INC_DIR}/SFGUI/Engines/Bob/Spritebox.hpp
 	${INC_DIR}/SFGUI/Engines/Bob/TextureManager.hpp
 	${INC_DIR}/SFGUI/Engines/BREW.hpp
 	${INC_DIR}/SFGUI/Entry.hpp
@@ -149,7 +148,6 @@ set(
 	${SRC_DIR}/SFGUI/Engines/Bob/Separator.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/Spinner.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/SpinButton.cpp
-	${SRC_DIR}/SFGUI/Engines/Bob/Spritebox.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/ToggleButton.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/TextureManager.cpp
 	${SRC_DIR}/SFGUI/Engines/Bob/Window.cpp
