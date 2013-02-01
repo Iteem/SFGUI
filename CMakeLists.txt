@@ -77,6 +77,8 @@ set(
 	${INC_DIR}/SFGUI/Engine.inl
     ${INC_DIR}/SFGUI/Engines/Bob.hpp
 	${INC_DIR}/SFGUI/Engines/Bob/TextureManager.hpp
+	${INC_DIR}/SFGUI/Engines/Bob/StreamOperators.hpp
+	${INC_DIR}/SFGUI/Engines/Bob/StreamOperators.inl
 	${INC_DIR}/SFGUI/Engines/BREW.hpp
 	${INC_DIR}/SFGUI/Entry.hpp
 	${INC_DIR}/SFGUI/FastDelegate.hpp
