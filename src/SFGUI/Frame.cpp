@@ -4,23 +4,14 @@
 
 namespace sfg {
 
-Frame::Frame() :
-	Bin(),
-	Misc()
-{
-	SetAlignment( sf::Vector2f( 0.f, 0.f ) );
-}
-
 Frame::Ptr Frame::Create( const sf::String& label ) {
-	Frame::Ptr ptr( new Frame );
-
+	auto ptr = std::make_shared<Frame>();
 	ptr->SetLabel( label );
-
 	return ptr;
 }
 
-RenderQueue* Frame::InvalidateImpl() const {
-	return Context::Get().GetEngine().CreateFrameDrawable( DynamicPointerCast<const Frame>( shared_from_this() ) );
+std::unique_ptr<RenderQueue> Frame::InvalidateImpl() const {
+	return Context::Get().GetEngine().CreateFrameDrawable( std::dynamic_pointer_cast<const Frame>( shared_from_this() ) );
 }
 
 void Frame::SetLabel( const sf::String& label ) {
@@ -45,7 +36,7 @@ sf::Vector2f Frame::CalculateRequisition() {
 	requisition.x += 2 * label_padding + 4 * border_width;
 	requisition.y = Context::Get().GetEngine().GetFontLineHeight( font, font_size ) + 4 * border_width;
 
-	Widget::Ptr child = GetChild();
+	auto child = GetChild();
 	if( child ) {
 		requisition.x += 2.f * padding + child->GetRequisition().x;
 		requisition.y += 2.f * padding + child->GetRequisition().y;
@@ -60,7 +51,7 @@ const std::string& Frame::GetName() const {
 }
 
 void Frame::HandleSizeChange() {
-	Widget::Ptr child = GetChild();
+	auto child = GetChild();
 	if( !child ) {
 		return;
 	}

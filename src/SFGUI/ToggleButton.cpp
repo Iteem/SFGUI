@@ -8,19 +8,13 @@ namespace sfg {
 Signal::SignalID ToggleButton::OnToggle = 0;
 
 ToggleButton::ToggleButton() :
-	Button(),
 	m_active( false )
 {
 }
 
-ToggleButton::~ToggleButton() {
-}
-
 ToggleButton::Ptr ToggleButton::Create( const sf::String& label ) {
 	Ptr button( new ToggleButton );
-
 	button->SetLabel( label );
-
 	return button;
 }
 
@@ -29,12 +23,12 @@ const std::string& ToggleButton::GetName() const {
 	return name;
 }
 
-RenderQueue* ToggleButton::InvalidateImpl() const {
+std::unique_ptr<RenderQueue> ToggleButton::InvalidateImpl() const {
 	if( GetChild() ) {
 		GetChild()->Invalidate();
 	}
 
-	return Context::Get().GetEngine().CreateToggleButtonDrawable( DynamicPointerCast<const ToggleButton>( shared_from_this() ) );
+	return Context::Get().GetEngine().CreateToggleButtonDrawable( std::dynamic_pointer_cast<const ToggleButton>( shared_from_this() ) );
 }
 
 void ToggleButton::SetActive( bool active ) {
@@ -45,10 +39,10 @@ void ToggleButton::SetActive( bool active ) {
 	m_active = active;
 
 	if( active ) {
-		SetState( SELECTED );
+		SetState( State::SELECTED );
 	}
 	else {
-		SetState( NORMAL );
+		SetState( State::NORMAL );
 	}
 
 	GetSignals().Emit( OnToggle );

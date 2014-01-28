@@ -5,18 +5,19 @@ namespace sfg {
 unsigned int Signal::m_serial = 1;
 Signal::SignalID Signal::m_last_guid = 0;
 
-Signal::Signal() :
-	m_delegates( 0 )
+Signal::Signal( Signal&& other ) :
+	m_delegates( std::move( other.m_delegates ) )
 {
 }
 
-Signal::~Signal() {
-	delete m_delegates;
+Signal& Signal::operator=( Signal&& other ) {
+	m_delegates = std::move( other.m_delegates );
+	return *this;
 }
 
-unsigned int Signal::Connect( Delegate delegate ) {
+unsigned int Signal::Connect( std::function<void()> delegate ) {
 	if( !m_delegates ) {
-		m_delegates = new DelegateMap;
+		m_delegates.reset( new DelegateMap );
 	}
 
 	(*m_delegates)[m_serial] = delegate;
@@ -28,11 +29,8 @@ void Signal::operator()() const {
 		return;
 	}
 
-	DelegateMap::const_iterator dg_iter( m_delegates->begin() );
-	DelegateMap::const_iterator dg_iter_end( m_delegates->end() );
-
-	for( ; dg_iter != dg_iter_end; ++dg_iter ) {
-		dg_iter->second();
+	for( const auto& delegate : *m_delegates ) {
+		delegate.second();
 	}
 }
 
@@ -44,8 +42,7 @@ void Signal::Disconnect( unsigned int serial ) {
 	m_delegates->erase( serial );
 
 	if( m_delegates->empty() ) {
-		delete m_delegates;
-		m_delegates = 0;
+		m_delegates.reset();
 	}
 }
 
@@ -53,27 +50,20 @@ Signal::SignalID Signal::GetGUID() {
 	return ++m_last_guid;
 }
 
-SignalContainer::SignalContainer() :
-	m_signals( 0 )
-{
-}
-
-SignalContainer::~SignalContainer() {
-	delete m_signals;
-}
-
 Signal& SignalContainer::operator[]( const Signal::SignalID& id ) {
 	if( !m_signals ) {
-		m_signals = new SignalMap;
+		m_signals.reset( new SignalMap );
 	}
 
 	// Find signal in the map.
-	SignalMap::iterator signal_iter = m_signals->find( id );
+	auto signal_iter = m_signals->find( id );
 
 	if( signal_iter == m_signals->end() ) {
 		// Requested signal is not present in map.
 		// Insert a new signal and set the iterator to point to it.
-		signal_iter = m_signals->insert( std::pair<Signal::SignalID, Signal>( id, Signal() ) ).first;
+		signal_iter = m_signals->insert(
+			std::pair<Signal::SignalID, Signal>( id, Signal() )
+		).first;
 	}
 
 	// Return the signal.
@@ -85,7 +75,7 @@ void SignalContainer::Emit( const Signal::SignalID& id ) {
 		return;
 	}
 
-	SignalMap::iterator signal_iter = m_signals->find( id );
+	auto signal_iter = m_signals->find( id );
 
 	if( signal_iter != m_signals->end() ) {
 		signal_iter->second();

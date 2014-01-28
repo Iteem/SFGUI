@@ -6,8 +6,7 @@
 namespace sfg {
 
 Canvas::Canvas( bool depth ) :
-	Widget(),
-	m_custom_draw_callback( new Signal ),
+	m_custom_draw_callback( std::make_shared<Signal>() ),
 	m_display_list( 0 ),
 	m_depth( depth ),
 	m_resize( false )
@@ -15,7 +14,7 @@ Canvas::Canvas( bool depth ) :
 	m_custom_viewport = Renderer::Get().CreateViewport();
 	SetViewport( m_custom_viewport );
 
-	m_custom_draw_callback->Connect( &Canvas::DrawRenderTexture, this );
+	m_custom_draw_callback->Connect( std::bind( &Canvas::DrawRenderTexture, this ) );
 }
 
 Canvas::~Canvas() {
@@ -25,12 +24,11 @@ Canvas::~Canvas() {
 }
 
 Canvas::Ptr Canvas::Create( bool depth ) {
-	Ptr gl_canvas_ptr( new Canvas( depth ) );
-	return gl_canvas_ptr;
+	return Ptr( new Canvas( depth ) );
 }
 
-RenderQueue* Canvas::InvalidateImpl() const {
-	RenderQueue* queue( new RenderQueue );
+std::unique_ptr<RenderQueue> Canvas::InvalidateImpl() const {
+	std::unique_ptr<RenderQueue> queue( new RenderQueue );
 
 	queue->Add(
 		Renderer::Get().CreateGLCanvas(
@@ -50,7 +48,7 @@ sf::Vector2f Canvas::CalculateRequisition() {
 }
 
 void Canvas::HandleSizeChange() {
-	sf::FloatRect allocation = GetAllocation();
+	auto allocation = GetAllocation();
 
 	m_custom_viewport->SetSize(
 		sf::Vector2f(
@@ -67,9 +65,9 @@ void Canvas::HandleSizeChange() {
 }
 
 void Canvas::HandleAbsolutePositionChange() {
-	sf::Vector2f position = Widget::GetAbsolutePosition();
+	auto position = Widget::GetAbsolutePosition();
 
-	Container::PtrConst parent = GetParent();
+	auto parent = GetParent();
 
 	sf::Vector2f parent_position( 0.f, 0.f );
 
@@ -119,19 +117,38 @@ void Canvas::Redraw() const {
 }
 
 void Canvas::Clear( const sf::Color& color, bool depth ) {
-	if( !m_render_texture || m_resize ) {
-		m_render_texture = SharedPtr<sf::RenderTexture>( new sf::RenderTexture );
+	auto allocation = GetAllocation();
 
-		sf::FloatRect allocation = GetAllocation();
+	if( !m_render_texture ) {
+		// Make sure there is a non-internal/shared context active.
+		// After 8 hours of debugging, I found out that if you deactivate the
+		// currently active context and construct a sf::RenderTexture, it leads
+		// to the sf::RenderTexture's internal OpenGL texture being created
+		// in a "corrupted" context leading to OpenGL possibly generating the
+		// same texture IDs that it already previously generated and are still in
+		// use. Since 2 textures share the same ID, when you draw to the
+		// sf::RenderTexture it actually overwrites whatever was in the other
+		// normally created texture. This leads to very exotic looking sf::Sprites,
+		// not for the end-user. SFML context management strikes again.
+		sf::Context context;
+
+		m_render_texture = std::make_shared<sf::RenderTexture>();
 
 		if( !m_render_texture->create( static_cast<unsigned int>( std::floor( allocation.width + .5f ) ), static_cast<unsigned int>( std::floor( allocation.height + .5f ) ), m_depth ) ) {
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 			std::cerr << "SFGUI warning: Canvas failed to create internal SFML RenderTexture.\n";
 #endif
 		}
-
-		m_resize = false;
 	}
+	else if( m_resize ) {
+		if( !m_render_texture->create( static_cast<unsigned int>( std::floor( allocation.width + .5f ) ), static_cast<unsigned int>( std::floor( allocation.height + .5f ) ), m_depth ) ) {
+#if defined( SFGUI_DEBUG )
+			std::cerr << "SFGUI warning: Canvas failed to create internal SFML RenderTexture.\n";
+#endif
+		}
+	}
+
+	m_resize = false;
 
 	m_render_texture->setActive( true );
 
@@ -158,19 +175,38 @@ void Canvas::Draw( const sf::Vertex* vertices, unsigned int vertex_count, sf::Pr
 }
 
 void Canvas::Bind() {
-	if( !m_render_texture || m_resize ) {
-		m_render_texture = SharedPtr<sf::RenderTexture>( new sf::RenderTexture );
+	auto allocation = GetAllocation();
 
-		sf::FloatRect allocation = GetAllocation();
+	if( !m_render_texture ) {
+		// Make sure there is a non-internal/shared context active.
+		// After 8 hours of debugging, I found out that if you deactivate the
+		// currently active context and construct a sf::RenderTexture, it leads
+		// to the sf::RenderTexture's internal OpenGL texture being created
+		// in a "corrupted" context leading to OpenGL possibly generating the
+		// same texture IDs that it already previously generated and are still in
+		// use. Since 2 textures share the same ID, when you draw to the
+		// sf::RenderTexture it actually overwrites whatever was in the other
+		// normally created texture. This leads to very exotic looking sf::Sprites,
+		// not for the end-user. SFML context management strikes again.
+		sf::Context context;
+
+		m_render_texture = std::make_shared<sf::RenderTexture>();
 
 		if( !m_render_texture->create( static_cast<unsigned int>( std::floor( allocation.width + .5f ) ), static_cast<unsigned int>( std::floor( allocation.height + .5f ) ), m_depth ) ) {
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 			std::cerr << "SFGUI warning: Canvas failed to create internal SFML RenderTexture.\n";
 #endif
 		}
-
-		m_resize = false;
 	}
+	else if( m_resize ) {
+		if( !m_render_texture->create( static_cast<unsigned int>( std::floor( allocation.width + .5f ) ), static_cast<unsigned int>( std::floor( allocation.height + .5f ) ), m_depth ) ) {
+#if defined( SFGUI_DEBUG )
+			std::cerr << "SFGUI warning: Canvas failed to create internal SFML RenderTexture.\n";
+#endif
+		}
+	}
+
+	m_resize = false;
 
 	m_render_texture->setActive( true );
 }
@@ -197,7 +233,7 @@ void Canvas::DrawRenderTexture() {
 		m_display_list = glGenLists( 1 );
 
 		if( !m_display_list ) {
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 			std::cerr << "SFGUI warning: Canvas failed to create OpenGL display list.\n";
 #endif
 		}

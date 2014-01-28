@@ -62,9 +62,6 @@ Engine::Engine() :
 {
 }
 
-Engine::~Engine() {
-}
-
 sf::Vector2f Engine::GetFontHeightProperties( const sf::Font& font, unsigned int font_size ) const {
 	// We want to cache line height values because they are expensive to compute.
 
@@ -72,19 +69,19 @@ sf::Vector2f Engine::GetFontHeightProperties( const sf::Font& font, unsigned int
 
 	// Get the font face that Laurent tries to hide from us.
 	struct FontStruct {
+		void* library;
 		void* font_face; // Authentic SFML comment: implementation details
 		void* unused1;
 		int* unused2;
+		std::string family;
 
 		// Since maps allocate everything non-contiguously on the heap we can use void* instead of Page here.
 		mutable std::map<unsigned int, void*> unused3;
 		mutable std::vector<sf::Uint8> unused4;
 	};
 
-	void* face;
-
 	// All your font face are belong to us too.
-	memcpy( &face, reinterpret_cast<const char*>( &font ) + sizeof( sf::Font ) - sizeof( FontStruct ), sizeof( void* ) );
+	void* face = reinterpret_cast<const FontStruct&>( font ).font_face;
 
 	std::pair<void*, unsigned int> id( face, font_size );
 
@@ -97,7 +94,7 @@ sf::Vector2f Engine::GetFontHeightProperties( const sf::Font& font, unsigned int
 	sf::Vector2f properties( 0.f, 0.f );
 
 	for( sf::Uint32 current_character = 0; current_character < 0x0370; ++current_character ) {
-		const sf::Glyph& glyph = font.getGlyph( current_character, font_size, false );
+		const auto& glyph = font.getGlyph( current_character, font_size, false );
 		properties.x = std::max( properties.x, static_cast<float>( glyph.bounds.height ) );
 		properties.y = std::max( properties.y, static_cast<float>( -glyph.bounds.top ) );
 	}
@@ -121,22 +118,18 @@ float Engine::GetFontLineSpacing( const sf::Font& font, unsigned int font_size )
 
 sf::Vector2f Engine::GetTextMetrics( const std::basic_string<sf::Uint32>& string, const sf::Font& font, unsigned int font_size ) const {
 	// SFML is incapable of giving us the metrics we need so we have to do it ourselves.
-	float horizontal_spacing = static_cast<float>( font.getGlyph( L' ', font_size, false ).advance );
-	float vertical_spacing = static_cast<float>( font.getLineSpacing( font_size ) );
+	auto horizontal_spacing = static_cast<float>( font.getGlyph( L' ', font_size, false ).advance );
+	auto vertical_spacing = static_cast<float>( font.getLineSpacing( font_size ) );
 
 	sf::Vector2f metrics( 0.f, 0.f );
 
-	const static float tab_spaces = 2.f;
+	const static auto tab_spaces = 2.f;
 
 	sf::Uint32 previous_character = 0;
 
-	std::size_t length = string.size();
+	auto longest_line = 0.f;
 
-	float longest_line = 0.f;
-
-	for( std::size_t index = 0; index < length; ++index ) {
-		sf::Uint32 current_character = string[index];
-
+	for( const auto& current_character : string ) {
 		metrics.x += static_cast<float>( font.getKerning( previous_character, current_character, font_size ) );
 
 		switch( current_character ) {
@@ -158,7 +151,7 @@ sf::Vector2f Engine::GetTextMetrics( const std::basic_string<sf::Uint32>& string
 				break;
 		}
 
-		const sf::Glyph& glyph = font.getGlyph( current_character, font_size, false );
+		const auto& glyph = font.getGlyph( current_character, font_size, false );
 
 		metrics.x += static_cast<float>( glyph.advance );
 		metrics.y = std::max( metrics.y, static_cast<float>( glyph.bounds.height ) );
@@ -171,22 +164,18 @@ sf::Vector2f Engine::GetTextMetrics( const std::basic_string<sf::Uint32>& string
 
 sf::Vector2f Engine::GetTextMetrics( const sf::String& string, const sf::Font& font, unsigned int font_size ) const {
 	// SFML is incapable of giving us the metrics we need so we have to do it ourselves.
-	float horizontal_spacing = static_cast<float>( font.getGlyph( L' ', font_size, false ).advance );
-	float vertical_spacing = static_cast<float>( font.getLineSpacing( font_size ) );
+	auto horizontal_spacing = static_cast<float>( font.getGlyph( L' ', font_size, false ).advance );
+	auto vertical_spacing = static_cast<float>( font.getLineSpacing( font_size ) );
 
 	sf::Vector2f metrics( 0.f, 0.f );
 
-	const static float tab_spaces = 2.f;
+	const static auto tab_spaces = 2.f;
 
 	sf::Uint32 previous_character = 0;
 
-	std::size_t length = string.getSize();
+	auto longest_line = 0.f;
 
-	float longest_line = 0.f;
-
-	for( std::size_t index = 0; index < length; ++index ) {
-		sf::Uint32 current_character = string[index];
-
+	for( const auto& current_character : string ) {
 		metrics.x += static_cast<float>( font.getKerning( previous_character, current_character, font_size ) );
 
 		switch( current_character ) {
@@ -208,7 +197,7 @@ sf::Vector2f Engine::GetTextMetrics( const sf::String& string, const sf::Font& f
 				break;
 		}
 
-		const sf::Glyph& glyph = font.getGlyph( current_character, font_size, false );
+		const auto& glyph = font.getGlyph( current_character, font_size, false );
 
 		metrics.x += static_cast<float>( glyph.advance );
 		metrics.y = std::max( metrics.y, static_cast<float>( glyph.bounds.height ) );
@@ -220,68 +209,13 @@ sf::Vector2f Engine::GetTextMetrics( const sf::String& string, const sf::Font& f
 }
 
 bool Engine::LoadThemeFromString( const std::string& data ) {
-	parser::theme::Theme theme = parser::theme::ParseString( data );
+	auto theme = parser::theme::ParseString( data );
 
 	if( theme.empty() ) {
 		return false;
 	}
 
-	std::size_t num_rules = theme.size();
-
-	// Iterate over all rules
-	for( std::size_t rule_index = 0; rule_index < num_rules; ++rule_index ) {
-		std::size_t num_simple_selectors = theme[ rule_index ].m_selector.m_simple_selectors.size();
-
-		Selector::Ptr selector;
-
-		// Iterate over all simple selectors
-		for( std::size_t simple_selector_index = 0; simple_selector_index < num_simple_selectors; ++simple_selector_index ) {
-			int hierarchy = Selector::ROOT;
-
-			if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == ">" ) {
-				hierarchy = Selector::CHILD;
-			}
-			else if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == " " ) {
-				hierarchy = Selector::DESCENDANT;
-			}
-			else if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == "," ) {
-				// Grouping combinator detected. Stop eating simple selectors and set the properties now.
-				std::size_t num_declarations = theme[ rule_index ].m_declarations.size();
-
-				// Iterate over all declarations
-				for( std::size_t declaration_index = 0; declaration_index < num_declarations; ++declaration_index ) {
-					std::string property_name = theme[ rule_index ].m_declarations[ declaration_index ].m_property_name;
-					std::string property_value = theme[ rule_index ].m_declarations[ declaration_index ].m_property_value;
-
-					// Finally set the property
-					SetProperty( selector, property_name, property_value );
-				}
-
-				// Reset the current simple selector to be the root of a new chain.
-				selector = Selector::Ptr();
-			}
-
-			selector = Selector::Create(
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_type_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_id_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_class_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_state_selector,
-				hierarchy,
-				selector
-			);
-		}
-
-		std::size_t num_declarations = theme[ rule_index ].m_declarations.size();
-
-		// Iterate over all declarations
-		for( std::size_t declaration_index = 0; declaration_index < num_declarations; ++declaration_index ) {
-			std::string property_name = theme[ rule_index ].m_declarations[ declaration_index ].m_property_name;
-			std::string property_value = theme[ rule_index ].m_declarations[ declaration_index ].m_property_value;
-
-			// Finally set the property
-			SetProperty( selector, property_name, property_value );
-		}
-	}
+	ParseTheme( theme );
 
 	return true;
 }
@@ -312,7 +246,7 @@ void Engine::ShiftBorderColors( sf::Color& light_color, sf::Color& dark_color, i
 	dark_color.b = static_cast<sf::Uint8>( std::min( 255, std::max( 0, static_cast<int>( dark_color.b ) - offset ) ) );
 }
 
-const std::string* Engine::GetValue( const std::string& property, const Widget::PtrConst& widget ) const {
+const std::string* Engine::GetValue( const std::string& property, Widget::PtrConst widget ) const {
 	// Look for property.
 	PropertyMap::const_iterator prop_iter( m_properties.find( property ) );
 
@@ -328,15 +262,13 @@ const std::string* Engine::GetValue( const std::string& property, const Widget::
 
 			if( name_iter != prop_iter->second.end() ) {
 				// Check against selectors.
-				std::size_t selector_value_list_size = name_iter->second.size();
-
-				for( std::size_t index = 0; index < selector_value_list_size; ++index ) {
-					if( name_iter->second[index].first->Matches( widget ) ) {
+				for( const auto& selector_value : name_iter->second ) {
+					if( selector_value.first->Matches( widget ) ) {
 						// Found, check if it is better than current best.
-						int new_score = name_iter->second[index].first->GetScore();
+						auto new_score = selector_value.first->GetScore();
 
 						if( new_score > score ) {
-							value = &name_iter->second[index].second;
+							value = &selector_value.second;
 							score = new_score;
 						}
 					}
@@ -348,15 +280,13 @@ const std::string* Engine::GetValue( const std::string& property, const Widget::
 		name_iter = prop_iter->second.find( "*" );
 
 		if( name_iter != prop_iter->second.end() ) {
-			std::size_t selector_value_list_size = name_iter->second.size();
-
-			for( std::size_t index = 0; index < selector_value_list_size; ++index ) {
-				if( name_iter->second[index].first->Matches( widget ) ) {
+			for( const auto& selector_value : name_iter->second ) {
+				if( selector_value.first->Matches( widget ) ) {
 					// Found, check if it is better than current best.
-					int new_score = name_iter->second[index].first->GetScore();
+					auto new_score = selector_value.first->GetScore();
 
 					if( new_score > score ) {
-						value = &name_iter->second[index].second;
+						value = &selector_value.second;
 						score = new_score;
 					}
 				}
@@ -371,7 +301,7 @@ ResourceManager& Engine::GetResourceManager() const {
 	return m_resource_manager;
 }
 
-bool Engine::SetProperty( const sfg::Selector::Ptr& selector, const std::string& property, const std::string& value ) {
+bool Engine::SetProperty( sfg::Selector::Ptr selector, const std::string& property, const std::string& value ) {
 	if( !selector ) {
 		// Invalid selector string given.
 		return false;
@@ -403,68 +333,13 @@ bool Engine::SetProperty( const sfg::Selector::Ptr& selector, const std::string&
 }
 
 bool Engine::SetProperties( const std::string& properties ) {
-	parser::theme::Theme theme = parser::theme::ParseString( properties );
+	auto theme = parser::theme::ParseString( properties );
 
 	if( theme.empty() ) {
 		return false;
 	}
 
-	std::size_t num_rules = theme.size();
-
-	// Iterate over all rules
-	for( std::size_t rule_index = 0; rule_index < num_rules; ++rule_index ) {
-		std::size_t num_simple_selectors = theme[ rule_index ].m_selector.m_simple_selectors.size();
-
-		Selector::Ptr selector;
-
-		// Iterate over all simple selectors
-		for( std::size_t simple_selector_index = 0; simple_selector_index < num_simple_selectors; ++simple_selector_index ) {
-			int hierarchy = Selector::ROOT;
-
-			if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == ">" ) {
-				hierarchy = Selector::CHILD;
-			}
-			else if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == " " ) {
-				hierarchy = Selector::DESCENDANT;
-			}
-			else if( theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_combinator == "," ) {
-				// Grouping combinator detected. Stop eating simple selectors and set the properties now.
-				std::size_t num_declarations = theme[ rule_index ].m_declarations.size();
-
-				// Iterate over all declarations
-				for( std::size_t declaration_index = 0; declaration_index < num_declarations; ++declaration_index ) {
-					std::string property_name = theme[ rule_index ].m_declarations[ declaration_index ].m_property_name;
-					std::string property_value = theme[ rule_index ].m_declarations[ declaration_index ].m_property_value;
-
-					// Finally set the property
-					SetProperty( selector, property_name, property_value );
-				}
-
-				// Reset the current simple selector to be the root of a new chain.
-				selector = Selector::Ptr();
-			}
-
-			selector = Selector::Create(
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_type_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_id_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_class_selector,
-				theme[ rule_index ].m_selector.m_simple_selectors[ simple_selector_index ].m_state_selector,
-				hierarchy,
-				selector
-			);
-		}
-
-		std::size_t num_declarations = theme[ rule_index ].m_declarations.size();
-
-		// Iterate over all declarations
-		for( std::size_t declaration_index = 0; declaration_index < num_declarations; ++declaration_index ) {
-			std::string property_name = theme[ rule_index ].m_declarations[ declaration_index ].m_property_name;
-			std::string property_value = theme[ rule_index ].m_declarations[ declaration_index ].m_property_value;
-
-			// Finally set the property
-			SetProperty( selector, property_name, property_value );
-		}
-	}
+	ParseTheme( theme );
 
 	if( m_auto_refresh ) {
 		Widget::RefreshAll();
@@ -479,6 +354,57 @@ void Engine::ClearProperties() {
 
 void Engine::SetAutoRefresh( bool enable ) {
 	m_auto_refresh = enable;
+}
+
+void Engine::ParseTheme( const parser::theme::Theme& theme_to_parse ) {
+	// Iterate over all rules
+	for( const auto& rule : theme_to_parse ) {
+		Selector::Ptr selector;
+
+		// Iterate over all simple selectors
+		for( const auto& simple_selector : rule.m_selector.m_simple_selectors ) {
+			auto hierarchy = Selector::HierarchyType::ROOT;
+
+			if( simple_selector.m_combinator == ">" ) {
+				hierarchy = Selector::HierarchyType::CHILD;
+			}
+			else if( simple_selector.m_combinator == " " ) {
+				hierarchy = Selector::HierarchyType::DESCENDANT;
+			}
+			else if( simple_selector.m_combinator == "," ) {
+				// Grouping combinator detected. Stop eating simple selectors and set the properties now.
+				// Iterate over all declarations
+				for( const auto& declaration : rule.m_declarations ) {
+					auto property_name = declaration.m_property_name;
+					auto property_value = declaration.m_property_value;
+
+					// Finally set the property
+					SetProperty( selector, property_name, property_value );
+				}
+
+				// Reset the current simple selector to be the root of a new chain.
+				selector = Selector::Ptr();
+			}
+
+			selector = Selector::Create(
+				simple_selector.m_type_selector,
+				simple_selector.m_id_selector,
+				simple_selector.m_class_selector,
+				simple_selector.m_state_selector,
+				hierarchy,
+				selector
+			);
+		}
+
+		// Iterate over all declarations
+		for( const auto& declaration : rule.m_declarations ) {
+			auto property_name = declaration.m_property_name;
+			auto property_value = declaration.m_property_value;
+
+			// Finally set the property
+			SetProperty( selector, property_name, property_value );
+		}
+	}
 }
 
 }

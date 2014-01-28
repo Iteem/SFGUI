@@ -4,17 +4,12 @@
 namespace sfg {
 
 Alignment::Alignment() :
-	Bin(),
-	Misc(),
 	m_scale( sf::Vector2f( 1.f, 1.f ) )
 {
-	SetAlignment( sf::Vector2f( 0.f, 0.f ) );
 }
 
 Alignment::Ptr Alignment::Create() {
-	Alignment::Ptr ptr( new Alignment );
-
-	return ptr;
+	return Ptr( new Alignment );
 }
 
 void Alignment::SetScale( const sf::Vector2f& scale ) {
@@ -27,7 +22,7 @@ const sf::Vector2f& Alignment::GetScale() const {
 }
 
 sf::Vector2f Alignment::CalculateRequisition() {
-	Widget::Ptr child = GetChild();
+	auto child = GetChild();
 
 	if( !child ) {
 		return sf::Vector2f( 0.f, 0.f );
@@ -50,7 +45,7 @@ void Alignment::HandleAlignmentChange( const sf::Vector2f& /*old_alignment*/ ) {
 }
 
 void Alignment::UpdateChild() {
-	Widget::Ptr child = GetChild();
+	auto child = GetChild();
 
 	if( !child ) {
 		return;
@@ -64,7 +59,7 @@ void Alignment::UpdateChild() {
 	spare_space.y *= 1.f - GetScale().y;
 
 	if( ( spare_space.x < 0 ) || ( spare_space.y < 0 ) ) {
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 		std::cerr << "SFGUI warning: Alignment got a smaller allocation than it requested.\n";
 		return;
 #endif

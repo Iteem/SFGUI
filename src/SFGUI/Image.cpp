@@ -7,19 +7,14 @@
 
 namespace sfg {
 
-Image::Image( const sf::Image& image ) :
-	Misc()
+Image::Image( const sf::Image& image )
 {
 	SetAlignment( sf::Vector2f( .5f, .5f ) );
 	SetImage( image );
 }
 
-Image::~Image() {
-}
-
 Image::Ptr Image::Create( const sf::Image& image ) {
-	Ptr image_ptr( new Image( image ) );
-	return image_ptr;
+	return Ptr( new Image( image ) );
 }
 
 void Image::SetImage( const sf::Image& image ) {
@@ -44,8 +39,8 @@ const sf::Image& Image::GetImage() const {
 	return m_image;
 }
 
-RenderQueue* Image::InvalidateImpl() const {
-	RenderQueue* queue = Context::Get().GetEngine().CreateImageDrawable( DynamicPointerCast<const Image>( shared_from_this() ) );
+std::unique_ptr<RenderQueue> Image::InvalidateImpl() const {
+	std::unique_ptr<RenderQueue> queue = Context::Get().GetEngine().CreateImageDrawable( std::dynamic_pointer_cast<const Image>( shared_from_this() ) );
 
 	m_texture_offset = queue->GetPrimitives()[0]->GetTextures()[0]->offset;
 

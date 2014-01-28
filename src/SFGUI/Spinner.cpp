@@ -8,18 +8,12 @@ namespace sfg {
 Spinner::Spinner() :
 	m_elapsed_time( 0.f ),
 	m_stage( 1 ),
-	m_renderqueue( 0 ),
 	m_started( false )
 {
 }
 
-Spinner::~Spinner() {
-}
-
 Spinner::Ptr Spinner::Create() {
-	Spinner::Ptr ptr( new Spinner );
-
-	return ptr;
+	return Ptr( new Spinner );
 }
 
 void Spinner::Start() {
@@ -40,9 +34,8 @@ bool Spinner::Started() const {
 	return m_started;
 }
 
-RenderQueue* Spinner::InvalidateImpl() const {
-	m_renderqueue = Context::Get().GetEngine().CreateSpinnerDrawable( DynamicPointerCast<const Spinner>( shared_from_this() ) );
-	return m_renderqueue;
+std::unique_ptr<RenderQueue> Spinner::InvalidateImpl() const {
+	return Context::Get().GetEngine().CreateSpinnerDrawable( std::dynamic_pointer_cast<const Spinner>( shared_from_this() ) );
 }
 
 sf::Vector2f Spinner::CalculateRequisition() {

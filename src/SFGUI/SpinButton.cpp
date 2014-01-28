@@ -13,7 +13,7 @@ namespace sfg {
 // Signals.
 Signal::SignalID SpinButton::OnValueChanged = 0;
 
-SpinButton::SpinButton( const Adjustment::Ptr& adjustment ) :
+SpinButton::SpinButton( Adjustment::Ptr adjustment ) :
 	m_adjustment( adjustment ),
 	m_elapsed_time( 0.f ),
 	m_digits( 0 ),
@@ -21,31 +21,26 @@ SpinButton::SpinButton( const Adjustment::Ptr& adjustment ) :
 	m_increase_pressed( false ),
 	m_repeat_wait( true )
 {
-	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( &SpinButton::UpdateTextFromAdjustment, this );
+	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( std::bind( &SpinButton::UpdateTextFromAdjustment, this ) );
 }
 
 SpinButton::Ptr SpinButton::Create( float minimum, float maximum, float step ) {
-	Adjustment::Ptr adjustment( Adjustment::Create() );
-
-	SpinButton::Ptr ptr( new SpinButton( adjustment ) );
-
+	auto adjustment = Adjustment::Create();
 	adjustment->Configure( minimum, minimum, maximum, step, 0.f, 0.f );
 
-	return ptr;
+	return Ptr( new SpinButton( adjustment ) );
 }
 
-SpinButton::Ptr SpinButton::Create( const Adjustment::Ptr& adjustment ) {
+SpinButton::Ptr SpinButton::Create( Adjustment::Ptr adjustment ) {
 	if( !adjustment ) {
 		return Create( 0.f, 0.f, 0.f );
 	}
 
-	SpinButton::Ptr ptr( new SpinButton( adjustment ) );
-
-	return ptr;
+	return Ptr( new SpinButton( adjustment ) );
 }
 
-RenderQueue* SpinButton::InvalidateImpl() const {
-	return Context::Get().GetEngine().CreateSpinButtonDrawable( DynamicPointerCast<const SpinButton>( shared_from_this() ) );
+std::unique_ptr<RenderQueue> SpinButton::InvalidateImpl() const {
+	return Context::Get().GetEngine().CreateSpinButtonDrawable( std::dynamic_pointer_cast<const SpinButton>( shared_from_this() ) );
 }
 
 sf::Vector2f SpinButton::CalculateRequisition() {
@@ -54,7 +49,7 @@ sf::Vector2f SpinButton::CalculateRequisition() {
 	float border_width( Context::Get().GetEngine().GetProperty<float>( "BorderWidth", shared_from_this() ) );
 	float text_padding( Context::Get().GetEngine().GetProperty<float>( "Padding", shared_from_this() ) );
 	const sf::Font& font( *Context::Get().GetEngine().GetResourceManager().GetFont( font_name ) );
-	float line_height = Context::Get().GetEngine().GetFontLineHeight( font, font_size );
+	auto line_height = Context::Get().GetEngine().GetFontLineHeight( font, font_size );
 
 	return sf::Vector2f( 2 * (border_width + text_padding), line_height + 2 * ( border_width + text_padding ) );
 }
@@ -80,8 +75,8 @@ void SpinButton::HandleMouseButtonEvent( sf::Mouse::Button button, bool press, i
 		return;
 	}
 
-	float stepper_height = ( GetAllocation().height / 2.f ) - border_width;
-	float stepper_width = ( GetAllocation().height / 2.f ) * stepper_aspect_ratio;
+	auto stepper_height = ( GetAllocation().height / 2.f ) - border_width;
+	auto stepper_width = ( GetAllocation().height / 2.f ) * stepper_aspect_ratio;
 
 	if( press ) {
 		// Top stepper.
@@ -203,7 +198,7 @@ void SpinButton::HandleSizeChange() {
 	Entry::HandleSizeChange();
 }
 
-void SpinButton::HandleFocusChange( const Widget::Ptr& focused_widget ) {
+void SpinButton::HandleFocusChange( Widget::Ptr focused_widget ) {
 	Entry::HandleFocusChange( focused_widget );
 
 	if( focused_widget != shared_from_this() ) {
@@ -213,18 +208,18 @@ void SpinButton::HandleFocusChange( const Widget::Ptr& focused_widget ) {
 	UpdateTextFromAdjustment();
 }
 
-const Adjustment::Ptr& SpinButton::GetAdjustment() const {
+Adjustment::Ptr SpinButton::GetAdjustment() const {
 	return m_adjustment;
 }
 
-void SpinButton::SetAdjustment( const Adjustment::Ptr& adjustment ) {
+void SpinButton::SetAdjustment( Adjustment::Ptr adjustment ) {
 	if( !adjustment ) {
 		return;
 	}
 
 	m_adjustment->GetSignal( Adjustment::OnChange ).Disconnect( m_adjustment_signal_serial );
 	m_adjustment = adjustment;
-	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( &SpinButton::UpdateTextFromAdjustment, this );
+	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( std::bind( &SpinButton::UpdateTextFromAdjustment, this ) );
 
 	UpdateTextFromAdjustment();
 }
@@ -266,7 +261,7 @@ void SpinButton::SetDigits( unsigned int digits ) {
 	UpdateTextFromAdjustment();
 }
 
-void SpinButton::Configure( const Adjustment::Ptr& adjustment, float step, unsigned int digits ) {
+void SpinButton::Configure( Adjustment::Ptr adjustment, float step, unsigned int digits ) {
 	SetAdjustment( adjustment );
 	SetStep( step );
 	SetDigits( digits );
@@ -295,9 +290,9 @@ void SpinButton::UpdateAdjustmentFromText() {
 		return;
 	}
 
-	float offset = value - m_adjustment->GetLower();
-	float multiple = ( m_adjustment->GetMinorStep() != 0.f ) ? ( offset / m_adjustment->GetMinorStep() ) : 0.f;
-	float step_offset = offset - std::floor( multiple ) * m_adjustment->GetMinorStep();
+	auto offset = value - m_adjustment->GetLower();
+	auto multiple = ( m_adjustment->GetMinorStep() != 0.f ) ? ( offset / m_adjustment->GetMinorStep() ) : 0.f;
+	auto step_offset = offset - std::floor( multiple ) * m_adjustment->GetMinorStep();
 
 	if( step_offset >= m_adjustment->GetMinorStep() / 2.f ) {
 		value = m_adjustment->GetLower() + std::ceil( multiple ) * m_adjustment->GetMinorStep();

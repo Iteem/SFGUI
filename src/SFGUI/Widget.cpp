@@ -33,24 +33,21 @@ Signal::SignalID Widget::OnKeyPress = 0;
 Signal::SignalID Widget::OnKeyRelease = 0;
 Signal::SignalID Widget::OnText = 0;
 
-WeakPtr<Widget> Widget::m_focus_widget;
-WeakPtr<Widget> Widget::m_active_widget;
-WeakPtr<Widget> Widget::m_modal_widget;
+std::weak_ptr<Widget> Widget::m_focus_widget;
+std::weak_ptr<Widget> Widget::m_active_widget;
+std::weak_ptr<Widget> Widget::m_modal_widget;
 
 std::vector<Widget*> Widget::m_root_widgets;
 
 Widget::Widget() :
-	Object(),
-	m_allocation( 0.f, 0.f, 0.f, 0.f ),
-	m_requisition( 0.f, 0.f ),
-	m_custom_requisition( 0 ),
-	m_class_id( 0 ),
 	m_hierarchy_level( 0 ),
 	m_z_order( 0 ),
-	m_drawable( 0 ),
-	m_bitfield( static_cast<unsigned char>( 0xe1 ) ),
 	m_invalidated( true ),
-	m_parent_notified( false )
+	m_parent_notified( false ),
+	m_state( State::NORMAL ),
+	m_mouse_button_down( false ),
+	m_mouse_in( false ),
+	m_visible( true )
 {
 	m_viewport = Renderer::Get().GetDefaultViewport();
 
@@ -68,14 +65,10 @@ Widget::~Widget() {
 			m_root_widgets.erase( iter );
 		}
 	}
-
-	delete m_drawable;
-	delete m_custom_requisition;
-	delete m_class_id;
 }
 
 bool Widget::IsLocallyVisible() const {
-	return ( m_bitfield & 0x01 );
+	return m_visible;
 }
 
 bool Widget::IsGloballyVisible() const {
@@ -168,7 +161,7 @@ void Widget::RequestResize() {
 
 	HandleRequisitionChange();
 
-	Container::Ptr parent = m_parent.lock();
+	auto parent = m_parent.lock();
 
 	// Notify observers.
 	GetSignals().Emit( OnSizeRequest );
@@ -198,7 +191,6 @@ void Widget::Update( float seconds ) {
 		m_invalidated = false;
 		m_parent_notified = false;
 
-		delete m_drawable;
 		m_drawable = InvalidateImpl();
 
 		if( m_drawable ) {
@@ -207,9 +199,9 @@ void Widget::Update( float seconds ) {
 			m_drawable->SetZOrder( m_z_order );
 			m_drawable->Show( IsGloballyVisible() );
 
-			// We don't want to propagate container viewports for GLCanvases,
-			// they have their own special viewport for GL drawing.
-			if( !m_drawable->GetPrimitives().empty() && !m_drawable->GetPrimitives()[0]->GetCustomDrawCallback() ) {
+			// We don't want to propagate container viewports for Canvases,
+			// they have their own special viewport for drawing.
+			if( m_drawable->GetPrimitives().empty() || !m_drawable->GetPrimitives()[0]->GetCustomDrawCallback() ) {
 				m_drawable->SetViewport( m_viewport );
 			}
 		}
@@ -224,7 +216,7 @@ void Widget::Invalidate() const {
 	}
 
 	if( !m_parent_notified ) {
-		Container::PtrConst parent = m_parent.lock();
+		auto parent = m_parent.lock();
 
 		if( parent ) {
 			m_parent_notified = true;
@@ -234,14 +226,13 @@ void Widget::Invalidate() const {
 	}
 }
 
-RenderQueue* Widget::InvalidateImpl() const {
-	return 0;
+std::unique_ptr<RenderQueue> Widget::InvalidateImpl() const {
+	return nullptr;
 }
 
-void Widget::SetParent( const Widget::Ptr& parent ) {
-	Container::Ptr cont( DynamicPointerCast<Container>( parent ) );
-
-	Container::Ptr oldparent = m_parent.lock();
+void Widget::SetParent( Widget::Ptr parent ) {
+	auto cont = std::dynamic_pointer_cast<Container>( parent );
+	auto oldparent = m_parent.lock();
 
 	if( cont == oldparent ) {
 		return;
@@ -253,7 +244,7 @@ void Widget::SetParent( const Widget::Ptr& parent ) {
 
 	m_parent = cont;
 
-	std::vector<Widget*>::iterator iter( std::find( m_root_widgets.begin(), m_root_widgets.end(), this ) );
+	auto iter = std::find( m_root_widgets.begin(), m_root_widgets.end(), this );
 
 	if( parent ) {
 		// If this widget has a parent, it is no longer a root widget.
@@ -294,7 +285,7 @@ void Widget::HandleEvent( const sf::Event& event ) {
 	}
 
 	// Ignore the event if widget is insensitive
-	if ( GetState() == INSENSITIVE ) {
+	if ( GetState() == State::INSENSITIVE ) {
 		return;
 	}
 
@@ -311,7 +302,7 @@ void Widget::HandleEvent( const sf::Event& event ) {
 	// Set widget active in context.
 	Context::Get().SetActiveWidget( shared_from_this() );
 
-	Container::Ptr parent( m_parent.lock() );
+	auto parent = m_parent.lock();
 
 	switch( event.type ) {
 		case sf::Event::MouseLeft:
@@ -438,13 +429,10 @@ void Widget::SetState( State state ) {
 		return;
 	}
 
-	unsigned char old_state( GetState() );
-
-	// Clear the state bits to 0s.
-	m_bitfield &= static_cast<unsigned char>( 0xf1 );
+	auto old_state = GetState();
 
 	// Store the new state.
-	m_bitfield |= static_cast<unsigned char>( state << 1 );
+	m_state = state;
 
 	// If HandleStateChange() changed the state, do not call observer, will be
 	// done from there too.
@@ -453,17 +441,17 @@ void Widget::SetState( State state ) {
 		GetSignals().Emit( OnStateChange );
 	}
 
-	if( state == ACTIVE ) {
+	if( state == State::ACTIVE ) {
 		GrabFocus( shared_from_this() );
 		SetActiveWidget( shared_from_this() );
 	}
-	else if( old_state == ACTIVE ) {
+	else if( old_state == State::ACTIVE ) {
 		SetActiveWidget( Ptr() );
 	}
 }
 
 Widget::State Widget::GetState() const {
-	return static_cast<State>( ( ( m_bitfield & 0x0e ) >> 1 ) );
+	return m_state;
 }
 
 Container::Ptr Widget::GetParent() {
@@ -483,43 +471,25 @@ bool Widget::HasFocus() const {
 }
 
 bool Widget::IsMouseInWidget() const {
-	return ( m_bitfield & static_cast<unsigned char>( 0x10 ) ) != 0;
+	return m_mouse_in;
 }
 
 void Widget::SetMouseInWidget( bool in_widget ) {
-	m_bitfield |= static_cast<unsigned char>( 0x10 );
-
-	if( !in_widget ) {
-		m_bitfield ^= static_cast<unsigned char>( 0x10 );
-	}
+	m_mouse_in = in_widget;
 }
 
 bool Widget::IsMouseButtonDown( sf::Mouse::Button button ) const {
-	// Check if no button is down.
-	if( ( m_bitfield & static_cast<unsigned char>( 0xe0 ) ) == static_cast<unsigned char>( 0xe0 ) ) {
-		return false;
-	}
-	else if( button == sf::Mouse::ButtonCount ) {
-		// Check if any button is down if requested.
-		return true;
+	// Check if any button is down if requested.
+	if( button == sf::Mouse::ButtonCount ) {
+		return m_mouse_button_down != sf::Mouse::ButtonCount;
 	}
 
-	return ( ( ( m_bitfield & 0xe0 ) >> 5 ) == button );
+	// Check if requested button is down.
+	return m_mouse_button_down == button;
 }
 
 void Widget::SetMouseButtonDown( sf::Mouse::Button button ) {
-	// Clear the mouse_button_down bits to 0s.
-	m_bitfield &= static_cast<unsigned char>( 0x1f );
-
-	if( button == sf::Mouse::ButtonCount ) {
-		// Set the mouse_button_down bits to "no button down".
-		m_bitfield |= static_cast<unsigned char>( 0xe0 );
-
-		return;
-	}
-
-	// Set the mouse_button_down bits.
-	m_bitfield |= static_cast<unsigned char>( button << 5 );
+	m_mouse_button_down = static_cast<unsigned char>( button & 0x3f ); // 6 bits
 }
 
 void Widget::Show( bool show ) {
@@ -527,10 +497,10 @@ void Widget::Show( bool show ) {
 		return;
 	}
 
-	bool old_global_visibility = IsGloballyVisible();
+	auto old_global_visibility = IsGloballyVisible();
 
 	// Flip the visible bit since we know show != IsLocallyVisible()
-	m_bitfield ^= 0x01;
+	m_visible = !m_visible;
 
 	HandleLocalVisibilityChange();
 
@@ -547,12 +517,10 @@ const sf::Vector2f& Widget::GetRequisition() const {
 
 void Widget::SetRequisition( const sf::Vector2f& requisition ) {
 	if( requisition.x > 0.f || requisition.y > 0.f ) {
-		delete m_custom_requisition;
-		m_custom_requisition = new sf::Vector2f( requisition );
+		m_custom_requisition.reset( new sf::Vector2f( requisition ) );
 	}
 	else {
-		delete m_custom_requisition;
-		m_custom_requisition = 0;
+		m_custom_requisition.reset();
 	}
 
 	RequestResize();
@@ -587,7 +555,7 @@ void Widget::SetId( const std::string& id ) {
 	}
 
 	if( !m_class_id ) {
-		m_class_id = new struct ClassId;
+		m_class_id.reset( new ClassId );
 	}
 
 	m_class_id->id = id;
@@ -609,7 +577,7 @@ void Widget::SetClass( const std::string& cls ) {
 	}
 
 	if( !m_class_id ) {
-		m_class_id = new struct ClassId;
+		m_class_id.reset( new ClassId );
 	}
 
 	m_class_id->class_ = cls;
@@ -630,18 +598,15 @@ Widget::Ptr SearchContainerForId( Container::PtrConst container, const std::stri
 		return Widget::Ptr();
 	}
 
-	Container::WidgetsList children = container->GetChildren();
-	std::size_t children_size = children.size();
-
-	for( std::size_t children_index = 0; children_index < children_size; ++children_index ) {
-		if( children[children_index]->GetId() == id ) {
-			return children[children_index];
+	for( const auto& child : container->GetChildren() ) {
+		if( child->GetId() == id ) {
+			return child;
 		}
 
-		Container::Ptr child_container( DynamicPointerCast<Container>( children[children_index] ) );
+		auto child_container = std::dynamic_pointer_cast<Container>( child );
 
 		if( child_container ) {
-			Widget::Ptr widget = SearchContainerForId( child_container, id );
+			auto widget = SearchContainerForId( child_container, id );
 
 			if( widget ) {
 				return widget;
@@ -653,17 +618,17 @@ Widget::Ptr SearchContainerForId( Container::PtrConst container, const std::stri
 }
 
 Widget::Ptr Widget::GetWidgetById( const std::string& id ) {
-	std::size_t root_widgets_size = m_root_widgets.size();
-
-	for( std::size_t root_widgets_index = 0; root_widgets_index < root_widgets_size; ++root_widgets_index ) {
-		if( m_root_widgets[root_widgets_index]->GetId() == id ) {
-			return m_root_widgets[root_widgets_index]->shared_from_this();
+	for( const auto& root_widget : m_root_widgets ) {
+		if( root_widget->GetId() == id ) {
+			return root_widget->shared_from_this();
 		}
 
-		Container::Ptr container( DynamicPointerCast<Container>( m_root_widgets[root_widgets_index]->shared_from_this() ) );
+		auto container = std::dynamic_pointer_cast<Container>(
+			root_widget->shared_from_this()
+		);
 
 		if( container ) {
-			Widget::Ptr widget = SearchContainerForId( container, id );
+			auto widget = SearchContainerForId( container, id );
 
 			if( widget ) {
 				return widget;
@@ -681,18 +646,15 @@ Widget::WidgetsList SearchContainerForClass( Container::PtrConst container, cons
 		return result;
 	}
 
-	Container::WidgetsList children = container->GetChildren();
-	std::size_t children_size = children.size();
-
-	for( std::size_t children_index = 0; children_index < children_size; ++children_index ) {
-		if( children[children_index]->GetClass() == class_name ) {
-			result.push_back( children[children_index] );
+	for( const auto& child : container->GetChildren() ) {
+		if( child->GetClass() == class_name ) {
+			result.push_back( child );
 		}
 
-		Container::Ptr child_container( DynamicPointerCast<Container>( children[children_index] ) );
+		auto child_container = std::dynamic_pointer_cast<Container>( child );
 
 		if( child_container ) {
-			Widget::WidgetsList child_result = SearchContainerForClass( child_container, class_name );
+			auto child_result = SearchContainerForClass( child_container, class_name );
 
 			// Splice the 2 vectors.
 			if( !child_result.empty() ) {
@@ -708,17 +670,17 @@ Widget::WidgetsList SearchContainerForClass( Container::PtrConst container, cons
 Widget::WidgetsList Widget::GetWidgetsByClass( const std::string& class_name ) {
 	WidgetsList result;
 
-	std::size_t root_widgets_size = m_root_widgets.size();
-
-	for( std::size_t root_widgets_index = 0; root_widgets_index < root_widgets_size; ++root_widgets_index ) {
-		if( m_root_widgets[root_widgets_index]->GetClass() == class_name ) {
-			result.push_back( m_root_widgets[root_widgets_index]->shared_from_this() );
+	for( const auto& root_widget : m_root_widgets ) {
+		if( root_widget->GetClass() == class_name ) {
+			result.push_back( root_widget->shared_from_this() );
 		}
 
-		Container::Ptr container( DynamicPointerCast<Container>( m_root_widgets[root_widgets_index]->shared_from_this() ) );
+		auto container = std::dynamic_pointer_cast<Container>(
+			root_widget->shared_from_this()
+		);
 
 		if( container ) {
-			WidgetsList container_result = SearchContainerForClass( container, class_name );
+			auto container_result = SearchContainerForClass( container, class_name );
 
 			// Splice the 2 vectors.
 			if( !container_result.empty() ) {
@@ -762,9 +724,9 @@ void Widget::HandleMouseLeave( int /*x*/, int /*y*/ ) {
 void Widget::HandleMouseClick( sf::Mouse::Button /*button*/, int /*x*/, int /*y*/ ) {
 }
 
-void Widget::HandleFocusChange( const Widget::Ptr& focused_widget ) {
-	if( ( focused_widget != shared_from_this() ) && ( GetState() == ACTIVE ) ) {
-		SetState( NORMAL );
+void Widget::HandleFocusChange( Widget::Ptr focused_widget ) {
+	if( ( focused_widget != shared_from_this() ) && ( GetState() == State::ACTIVE ) ) {
+		SetState( State::NORMAL );
 	}
 }
 
@@ -772,10 +734,10 @@ void Widget::HandleLocalVisibilityChange() {
 }
 
 void Widget::HandleGlobalVisibilityChange() {
-	State state = GetState();
+	auto state = GetState();
 
-	if( ( state == PRELIGHT ) || ( state == ACTIVE ) ) {
-		SetState( NORMAL );
+	if( ( state == State::PRELIGHT ) || ( state == State::ACTIVE ) ) {
+		SetState( State::NORMAL );
 	}
 
 	if( m_drawable ) {
@@ -794,10 +756,8 @@ void Widget::Refresh() {
 }
 
 void Widget::RefreshAll() {
-	std::size_t root_widgets_size = m_root_widgets.size();
-
-	for( std::size_t index = 0; index < root_widgets_size; ++index ) {
-		m_root_widgets[index]->Refresh();
+	for( const auto& root_widget : m_root_widgets ) {
+		root_widget->Refresh();
 	}
 }
 
@@ -823,13 +783,13 @@ int Widget::GetHierarchyLevel() const {
 	return m_hierarchy_level;
 }
 
-void Widget::SetViewport( const RendererViewport::Ptr& viewport ) {
+void Widget::SetViewport( RendererViewport::Ptr viewport ) {
 	m_viewport = viewport;
 
 	HandleViewportUpdate();
 }
 
-const RendererViewport::Ptr& Widget::GetViewport() const {
+RendererViewport::Ptr Widget::GetViewport() const {
 	return m_viewport;
 }
 
@@ -873,7 +833,7 @@ bool Widget::IsActiveWidget( PtrConst widget ) {
 
 void Widget::GrabModal() {
 	if( m_modal_widget.lock() ) {
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 		std::cerr << "SFGUI warning: Tried to grab modal while existing widget has it.\n";
 #endif
 
@@ -890,7 +850,7 @@ void Widget::ReleaseModal() {
 		return;
 	}
 
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 	std::cerr << "SFGUI warning: Tried to release modal although current widget not modal.\n";
 #endif
 }
@@ -904,7 +864,7 @@ bool Widget::IsModal() const {
 }
 
 bool Widget::HasModal() {
-	return m_modal_widget.lock();
+	return !m_modal_widget.expired();
 }
 
 const std::vector<Widget*>& Widget::GetRootWidgets() {

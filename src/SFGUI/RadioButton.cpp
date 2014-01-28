@@ -4,17 +4,8 @@
 
 namespace sfg {
 
-RadioButton::RadioButton() :
-	CheckButton(),
-	m_group()
-{
-}
-
-RadioButton::~RadioButton() {
-}
-
-RadioButton::Ptr RadioButton::Create( const sf::String& label, const SharedPtr<RadioButtonGroup>& group ) {
-	Ptr widget( new RadioButton );
+RadioButton::Ptr RadioButton::Create( const sf::String& label, RadioButton::RadioButtonGroup::Ptr group ) {
+	auto widget = std::make_shared<RadioButton>();
 
 	widget->SetLabel( label );
 
@@ -22,40 +13,40 @@ RadioButton::Ptr RadioButton::Create( const sf::String& label, const SharedPtr<R
 		widget->SetGroup( group );
 	}
 	else {
-		widget->SetGroup( SharedPtr<RadioButtonGroup>( new RadioButtonGroup ) );
+		widget->SetGroup( RadioButtonGroup::Create() );
 	}
 
 	return widget;
 }
 
-const SharedPtr<RadioButton::RadioButtonGroup>& RadioButton::GetGroup() const {
+RadioButton::RadioButtonGroup::Ptr RadioButton::GetGroup() const {
 	return m_group;
 }
 
-void RadioButton::SetGroup( const SharedPtr<RadioButton::RadioButtonGroup>& group ) {
-	WeakPtr<RadioButton> weak_this( StaticPointerCast<RadioButton>( shared_from_this() ) );
+void RadioButton::SetGroup( RadioButton::RadioButtonGroup::Ptr group ) {
+	std::weak_ptr<RadioButton> weak_this( std::static_pointer_cast<RadioButton>( shared_from_this() ) );
 
 	if( m_group ) {
-		m_group->members.erase( weak_this );
+		m_group->GetMembers().erase( weak_this );
 	}
 
 	m_group = group;
 
 	if( m_group ) {
-		m_group->members.insert( weak_this );
+		m_group->GetMembers().insert( weak_this );
 	}
 }
 
 void RadioButton::SetActive( bool active ) {
 	if( active && m_group ) {
-		for( std::set< WeakPtr<RadioButton> >::const_iterator iter = m_group->members.begin(); iter != m_group->members.end(); ++iter ) {
-			SharedPtr<RadioButton> radio_button( iter->lock() );
+		for( auto iter = m_group->GetMembers().begin(); iter != m_group->GetMembers().end(); ++iter ) {
+			std::shared_ptr<RadioButton> radio_button( iter->lock() );
 
 			if( radio_button ) {
 				radio_button->SetActive( false );
 			}
 			else {
-				m_group->members.erase( iter );
+				m_group->GetMembers().erase( iter );
 			}
 		}
 	}
@@ -74,6 +65,14 @@ void RadioButton::HandleMouseClick( sf::Mouse::Button button, int x, int y ) {
 const std::string& RadioButton::GetName() const {
 	static const std::string name( "RadioButton" );
 	return name;
+}
+
+RadioButton::RadioButtonGroup::Ptr RadioButton::RadioButtonGroup::Create() {
+	return std::make_shared<RadioButtonGroup>();
+}
+
+RadioButton::RadioButtonGroup::ContainerType& RadioButton::RadioButtonGroup::GetMembers() {
+	return m_members;
 }
 
 }

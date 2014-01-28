@@ -6,15 +6,13 @@
 namespace sfg {
 
 Box::Box( Orientation orientation, float spacing ) :
-	Container(),
 	m_spacing( spacing ),
 	m_orientation( orientation )
 {
 }
 
 Box::Ptr Box::Create( Orientation orientation, float spacing ) {
-	Box::Ptr ptr( new Box( orientation, spacing ) );
-	return ptr;
+	return Ptr( new Box( orientation, spacing ) );
 }
 
 const std::string& Box::GetName() const {
@@ -22,60 +20,60 @@ const std::string& Box::GetName() const {
 	return name;
 }
 
-void Box::PackEnd( const Widget::Ptr& widget, bool expand, bool fill ) {
+void Box::PackEnd( Widget::Ptr widget, bool expand, bool fill ) {
 	if( IsChild( widget ) ) {
 		return;
 	}
 
 	// It's important to create the ChildInfo object first, so that the
 	// HandleAdd() method recognized the widget as a correctly packed one.
-	m_children.push_back( ChildInfo( widget, expand, fill ) );
+	m_box_children.push_back( ChildInfo( widget, expand, fill ) );
 	Add( widget );
 }
 
-void Box::PackStart( const Widget::Ptr& widget, bool expand, bool fill ) {
+void Box::PackStart( Widget::Ptr widget, bool expand, bool fill ) {
 	if( IsChild( widget ) ) {
 		return;
 	}
 
 	// It's important to create the ChildInfo object first, so that the
 	// HandleAdd() method recognized the widget as a correctly packed one.
-	m_children.push_front( ChildInfo( widget, expand, fill ) );
+	m_box_children.push_front( ChildInfo( widget, expand, fill ) );
 	Add( widget );
 }
 
-void Box::Pack( const Widget::Ptr& widget, bool expand, bool fill ) {
+void Box::Pack( Widget::Ptr widget, bool expand, bool fill ) {
 	PackEnd( widget, expand, fill );
 }
 
-void Box::ReorderChild( const Widget::Ptr& widget, std::size_t position ) {
-	ChildrenCont::iterator iter( std::find( m_children.begin(), m_children.end(), widget ) );
+void Box::ReorderChild( Widget::Ptr widget, std::size_t position ) {
+	ChildrenCont::iterator iter( std::find( m_box_children.begin(), m_box_children.end(), widget ) );
 
-	if( iter == m_children.end() ) {
+	if( iter == m_box_children.end() ) {
 		return;
 	}
 
-	position = std::min( position, m_children.size() - 1 );
+	position = std::min( position, m_box_children.size() - 1 );
 
-	ChildrenCont::iterator insertion_point( m_children.begin() );
+	ChildrenCont::iterator insertion_point( m_box_children.begin() );
 	std::advance( insertion_point, position );
-	m_children.insert( insertion_point, *iter );
-	m_children.erase( iter );
+	m_box_children.insert( insertion_point, *iter );
+	m_box_children.erase( iter );
 
 	Refresh();
 	AllocateChildren();
 }
 
-void Box::HandleAdd( const Widget::Ptr& child ) {
+void Box::HandleAdd( Widget::Ptr child ) {
 	Container::HandleAdd( child );
 
-	ChildrenCont::const_iterator iter( std::find( m_children.begin(), m_children.end(), child ) );
+	ChildrenCont::const_iterator iter( std::find( m_box_children.begin(), m_box_children.end(), child ) );
 
 	// If there's no ChildInfo present for the widget, the user added the widget
 	// manually, which is not allowed for this class.
-	if( iter == m_children.end() ) {
+	if( iter == m_box_children.end() ) {
 
-#ifdef SFGUI_DEBUG
+#if defined( SFGUI_DEBUG )
 		std::cerr << "SFGUI warning: Child must be added via Pack() for sfg::Box widgets.\n";
 #endif
 
@@ -86,11 +84,11 @@ void Box::HandleAdd( const Widget::Ptr& child ) {
 	AllocateChildren();
 }
 
-void Box::HandleRemove( const Widget::Ptr& child ) {
-	ChildrenCont::iterator iter( std::find( m_children.begin(), m_children.end(), child ) );
+void Box::HandleRemove( Widget::Ptr child ) {
+	ChildrenCont::iterator iter( std::find( m_box_children.begin(), m_box_children.end(), child ) );
 
-	if( iter != m_children.end() ) {
-		m_children.erase( iter );
+	if( iter != m_box_children.end() ) {
+		m_box_children.erase( iter );
 	}
 
 	Refresh();
@@ -100,19 +98,17 @@ void Box::HandleRemove( const Widget::Ptr& child ) {
 sf::Vector2f Box::CalculateRequisition() {
 	sf::Vector2f requisition( 0.f, 0.f );
 	unsigned int num_visible( 0 );
-	ChildrenCont::const_iterator iter( m_children.begin() );
-	ChildrenCont::const_iterator iterend( m_children.end() );
 
-	for( ; iter != iterend; ++iter ) {
-		if( !IsChildInteresting( iter->widget ) ) {
+	for( const auto& child : m_box_children ) {
+		if( !IsChildInteresting( child.widget ) ) {
 			continue;
 		}
 
 		++num_visible;
 
-		sf::Vector2f child_requisition( iter->widget->GetRequisition() );
+		sf::Vector2f child_requisition( child.widget->GetRequisition() );
 
-		if( m_orientation == HORIZONTAL ) {
+		if( m_orientation == Orientation::HORIZONTAL ) {
 			requisition.x += child_requisition.x;
 			requisition.y = std::max( requisition.y, child_requisition.y );
 		}
@@ -123,7 +119,7 @@ sf::Vector2f Box::CalculateRequisition() {
 	}
 
 	if( num_visible > 1 ) {
-		if( m_orientation == HORIZONTAL ) {
+		if( m_orientation == Orientation::HORIZONTAL ) {
 			requisition.x += static_cast<float>( num_visible - 1 ) * GetSpacing();
 		}
 		else {
@@ -142,7 +138,7 @@ void Box::HandleSizeChange() {
 	AllocateChildren();
 }
 
-Box::ChildInfo::ChildInfo( const Widget::Ptr& widget_, bool expand_, bool fill_ ) :
+Box::ChildInfo::ChildInfo( Widget::Ptr widget_, bool expand_, bool fill_ ) :
 	widget( widget_ ),
 	expand( expand_ ),
 	fill( fill_ )
@@ -164,20 +160,18 @@ float Box::GetSpacing() const {
 }
 
 void Box::AllocateChildren() const {
-	ChildrenCont::const_iterator iter( m_children.begin() );
-	ChildrenCont::const_iterator iterend( m_children.end() );
 	unsigned int num_expand( 0 );
 	unsigned int num_visible( 0 );
 
 	// Count number of visible and expanded children.
-	for( ; iter != iterend; ++iter ) {
-		if( !IsChildInteresting( iter->widget ) ) {
+	for( const auto& child : m_box_children ) {
+		if( !IsChildInteresting( child.widget ) ) {
 			continue;
 		}
 
 		++num_visible;
 
-		if( iter->expand ) {
+		if( child.expand ) {
 			++num_expand;
 		}
 	}
@@ -186,7 +180,7 @@ void Box::AllocateChildren() const {
 	float extra( 0.f );
 
 	if( num_expand > 0 ) {
-		if( m_orientation == HORIZONTAL ) {
+		if( m_orientation == Orientation::HORIZONTAL ) {
 			extra = std::max( 0.f, GetAllocation().width - GetRequisition().x ) / static_cast<float>( num_expand );
 		}
 		else {
@@ -199,23 +193,23 @@ void Box::AllocateChildren() const {
 	sf::Vector2f allocation( 0.f, 0.f );
 	sf::Vector2f position( gap, gap );
 
-	for( iter = m_children.begin(); iter != iterend; ++iter ) {
-		if( !IsChildInteresting( iter->widget ) ) {
+	for( const auto& child : m_box_children ) {
+		if( !IsChildInteresting( child.widget ) ) {
 			continue;
 		}
 
-		if( m_orientation == HORIZONTAL ) {
-			allocation.x = iter->widget->GetRequisition().x + (iter->expand ? extra : 0.f);
+		if( m_orientation == Orientation::HORIZONTAL ) {
+			allocation.x = child.widget->GetRequisition().x + ( child.expand ? extra : 0.f );
 			allocation.y = GetAllocation().height - 2 * gap;
 
-			iter->widget->SetAllocation( sf::FloatRect( position.x, position.y, allocation.x - (iter->expand && !iter->fill ? extra : 0.f), allocation.y ) );
+			child.widget->SetAllocation( sf::FloatRect( position.x, position.y, allocation.x - ( child.expand && !child.fill ? extra : 0.f ), allocation.y ) );
 			position.x += allocation.x + GetSpacing();
 		}
 		else {
 			allocation.x = GetAllocation().width - 2 * gap;
-			allocation.y = iter->widget->GetRequisition().y + (iter->expand ? extra : 0.f);
+			allocation.y = child.widget->GetRequisition().y + ( child.expand ? extra : 0.f );
 
-			iter->widget->SetAllocation( sf::FloatRect( position.x, position.y, allocation.x, allocation.y - (iter->expand && !iter->fill ? extra : 0.f) ) );
+			child.widget->SetAllocation( sf::FloatRect( position.x, position.y, allocation.x, allocation.y - ( child.expand && !child.fill ? extra : 0.f ) ) );
 			position.y += allocation.y + GetSpacing();
 		}
 
@@ -223,7 +217,7 @@ void Box::AllocateChildren() const {
 	}
 }
 
-bool Box::IsChildInteresting( const sfg::Widget::PtrConst& child ) const {
+bool Box::IsChildInteresting( sfg::Widget::PtrConst child ) const {
 	return
 		child->IsLocallyVisible() &&
 		(child->GetRequisition().x > 0.f || child->GetAllocation().width > 0.0f) &&

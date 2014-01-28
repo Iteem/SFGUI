@@ -13,16 +13,10 @@ Adjustment::Adjustment( float value, float lower, float upper, float minor_step,
 	m_major_step( major_step ),
 	m_page_size( page_size )
 {
-
-}
-
-Adjustment::~Adjustment() {
-
 }
 
 Adjustment::Ptr Adjustment::Create( float value, float lower, float upper, float minor_step, float major_step, float page_size ) {
-	Adjustment::Ptr ptr( new Adjustment( value, lower, upper, minor_step, major_step, page_size ) );
-	return ptr;
+	return Adjustment::Ptr( new Adjustment( value, lower, upper, minor_step, major_step, page_size ) );
 }
 
 Adjustment& Adjustment::operator=( const Adjustment& adjustment ) {
@@ -41,7 +35,7 @@ float Adjustment::GetValue() const {
 }
 
 void Adjustment::SetValue( float new_value ) {
-	float old_value = m_value;
+	auto old_value = m_value;
 	m_value = new_value;
 
 	// Clamp value within limits

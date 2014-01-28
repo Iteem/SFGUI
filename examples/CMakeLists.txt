@@ -2,16 +2,16 @@ cmake_minimum_required( VERSION 2.8 )
 
 function( build_example SAMPLE_NAME SOURCES )
 	add_executable( ${SAMPLE_NAME} ${SOURCES} )
-	target_link_libraries( ${SAMPLE_NAME} sfgui ${SFML_GRAPHICS_LIBRARY} ${SFML_WINDOW_LIBRARY} ${SFML_SYSTEM_LIBRARY} ${OPENGL_glu_LIBRARY} ${OPENGL_gl_LIBRARY} )
+	target_link_libraries( ${SAMPLE_NAME} sfgui ${SFML_LIBRARIES} ${SFML_DEPENDENCIES} ${OPENGL_glu_LIBRARY} ${OPENGL_gl_LIBRARY} )
 
 	install(
 		TARGETS ${SAMPLE_NAME}
-		RUNTIME DESTINATION ${SHARE_TARGET_DIR}/examples COMPONENT examples
+		RUNTIME DESTINATION ${SHARE_PATH}/examples COMPONENT examples
 	)
 
 	install(
 		FILES ${SOURCES}
-		DESTINATION ${SHARE_TARGET_DIR}/examples COMPONENT examples
+		DESTINATION ${SHARE_PATH}/examples COMPONENT examples
 	)
 endfunction()
 
@@ -65,5 +65,5 @@ endif()
 
 install(
 	DIRECTORY data
-	DESTINATION ${SHARE_TARGET_DIR}/examples
+	DESTINATION ${SHARE_PATH}/examples
 )
