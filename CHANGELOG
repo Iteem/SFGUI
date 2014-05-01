@@ -1,8 +1,34 @@
 Changelog for SFGUI, http://sfgui.sfml-dev.de/
 
+0.2.3
+
+Fixes:
+  - Now using both GLEW_INCLUDE_PATH and GLEW_INCLUDE_DIRS for SFML
+    compatibility reasons.
+
+0.2.2
+
+Enhancements:
+  - Added possibility for specifying optional character sets for the renderer
+    during runtime to preload glyphs.
+
+Fixes:
+  - Replaced GLEW_INCLUDE_PATH by GLEW_INCLUDE_DIRS in CMake config.
+	- Added missing override declarations.
+
+0.2.1
+
+Enhancements:
+  - GLee replaced by GLEW.
+
+Fixes:
+  - Fixed compilation error on GLXContextID.
+  - Fixed CMake configuration generating library file names that ld couldn't
+    find when using symbolic names during linking.
+
 0.2.0
 
-Enhancement:
+Enhancements:
   - Conversion of codebase to use C++11 features.
   - Implemented two backend renderers (one uses vertex buffer objects, the
     other client-side vertex arrays).
