@@ -1,29 +1,48 @@
 #include <SFGUI/Renderer.hpp>
-#include <SFGUI/Renderers/VertexArrayRenderer.hpp>
-#include <SFGUI/Renderers/VertexBufferRenderer.hpp>
+#include <SFGUI/Renderers.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/Engine.hpp>
+#include <SFGUI/RendererBatch.hpp>
+#include <SFGUI/RendererTextureNode.hpp>
 #include <SFGUI/RendererViewport.hpp>
+#include <SFGUI/Primitive.hpp>
+#include <SFGUI/PrimitiveTexture.hpp>
+#include <SFGUI/PrimitiveVertex.hpp>
 
+#include <SFML/Graphics/Text.hpp>
+#include <SFML/Graphics/RenderWindow.hpp>
+#include <SFML/Graphics/RenderTexture.hpp>
+#include <SFML/Window/Context.hpp>
 #include <cmath>
 #include <cstring>
 #include <cassert>
 
-namespace sfg {
+namespace {
 
-std::shared_ptr<Renderer> Renderer::m_instance = std::shared_ptr<Renderer>();
+std::shared_ptr<sfg::Renderer> instance;
+int max_texture_size = 0;
+
+}
+
+namespace sfg {
 
 Renderer::Renderer() :
 	m_vertex_count( 0 ),
 	m_index_count( 0 ),
-	m_window_size( 0, 0 ),
-	m_max_texture_size( 0 ),
 	m_force_redraw( false ),
-	m_last_window_size( 0, 0 ) {
-	// Needed to determine maximum texture size.
-	sf::Context context;
+	m_primitives_sorted( false ) {
+	static auto checked_max_texture_size = false;
+
+	if( !checked_max_texture_size ) {
+		// Needed to determine maximum texture size.
+		sf::Context context;
+
+		max_texture_size = static_cast<int>( sf::Texture::getMaximumSize() );
+
+		checked_max_texture_size = true;
+	}
 
 	m_default_viewport = CreateViewport();
-	m_max_texture_size = sf::Texture::getMaximumSize();
 
 	// Load our "no texture" pseudo-texture.
 	sf::Image pseudo_image;
@@ -31,42 +50,48 @@ Renderer::Renderer() :
 	m_pseudo_texture = LoadTexture( pseudo_image );
 }
 
+Renderer::~Renderer() {
+}
+
 Renderer& Renderer::Create() {
-	if( !m_instance ) {
-		if( VertexBufferRenderer::IsAvailable() ) {
-			m_instance = std::make_shared<VertexBufferRenderer>();
+	if( !instance ) {
+		if( NonLegacyRenderer::IsAvailable() ) {
+			instance = NonLegacyRenderer::Create();
+		}
+		else if( VertexBufferRenderer::IsAvailable() ) {
+			instance = VertexBufferRenderer::Create();
 		}
 		else {
-			m_instance = std::make_shared<VertexArrayRenderer>();
+			instance = VertexArrayRenderer::Create();
 		}
 	}
 
-	return *m_instance;
+	return *instance;
 }
 
 Renderer& Renderer::Get() {
-	if( !m_instance ) {
+	if( !instance ) {
 #if defined( SFGUI_DEBUG )
 		std::cerr << "Renderer not created yet. Did you create an sfg::SFGUI object?\n";
 #endif
 		Create();
 	}
 
-	return *m_instance;
+	return *instance;
 }
 
 void Renderer::Set( std::shared_ptr<Renderer> renderer ) {
 	if( renderer ) {
-		m_instance = renderer;
+		instance = renderer;
 	}
 }
 
 void Renderer::Destroy() {
-	m_instance.reset();
+	instance.reset();
 }
 
 bool Renderer::Exists() {
-	return static_cast<bool>( m_instance );
+	return static_cast<bool>( instance );
 }
 
 RendererViewport::Ptr Renderer::GetDefaultViewport() {
@@ -123,10 +148,10 @@ Primitive::Ptr Renderer::CreateText( const sf::Text& text ) {
 
 		const auto& glyph = font.getGlyph( current_character, character_size, false );
 
-		Primitive::Vertex vertex0;
-		Primitive::Vertex vertex1;
-		Primitive::Vertex vertex2;
-		Primitive::Vertex vertex3;
+		PrimitiveVertex vertex0;
+		PrimitiveVertex vertex1;
+		PrimitiveVertex vertex2;
+		PrimitiveVertex vertex3;
 
 		vertex0.position = position + sf::Vector2f( static_cast<float>( glyph.bounds.left ), static_cast<float>( glyph.bounds.top ) );
 		vertex1.position = position + sf::Vector2f( static_cast<float>( glyph.bounds.left ), static_cast<float>( glyph.bounds.top + glyph.bounds.height ) );
@@ -172,10 +197,10 @@ Primitive::Ptr Renderer::CreateQuad( const sf::Vector2f& top_left, const sf::Vec
                                      const sf::Color& color ) {
 	auto primitive = std::make_shared<Primitive>( 4 );
 
-	Primitive::Vertex vertex0;
-	Primitive::Vertex vertex1;
-	Primitive::Vertex vertex2;
-	Primitive::Vertex vertex3;
+	PrimitiveVertex vertex0;
+	PrimitiveVertex vertex1;
+	PrimitiveVertex vertex2;
+	PrimitiveVertex vertex3;
 
 	vertex0.position = sf::Vector2f( std::floor( top_left.x + .5f ), std::floor( top_left.y + .5f ) );
 	vertex1.position = sf::Vector2f( std::floor( bottom_left.x + .5f ), std::floor( bottom_left.y + .5f ) );
@@ -306,9 +331,9 @@ Primitive::Ptr Renderer::CreateRect( const sf::FloatRect& rect, const sf::Color&
 Primitive::Ptr Renderer::CreateTriangle( const sf::Vector2f& point0, const sf::Vector2f& point1, const sf::Vector2f& point2, const sf::Color& color ) {
 	auto primitive = std::make_shared<Primitive>( 3 );
 
-	Primitive::Vertex vertex0;
-	Primitive::Vertex vertex1;
-	Primitive::Vertex vertex2;
+	PrimitiveVertex vertex0;
+	PrimitiveVertex vertex1;
+	PrimitiveVertex vertex2;
 
 	vertex0.position = point0;
 	vertex1.position = point1;
@@ -331,15 +356,15 @@ Primitive::Ptr Renderer::CreateTriangle( const sf::Vector2f& point0, const sf::V
 	return primitive;
 }
 
-Primitive::Ptr Renderer::CreateSprite( const sf::FloatRect& rect, Primitive::Texture::Ptr texture, const sf::FloatRect& subrect, int rotation_turns ) {
+Primitive::Ptr Renderer::CreateSprite( const sf::FloatRect& rect, PrimitiveTexture::Ptr texture, const sf::FloatRect& subrect, int rotation_turns ) {
 	auto offset = texture->offset;
 
 	auto primitive = std::make_shared<Primitive>( 4 );
 
-	Primitive::Vertex vertex0;
-	Primitive::Vertex vertex1;
-	Primitive::Vertex vertex2;
-	Primitive::Vertex vertex3;
+	PrimitiveVertex vertex0;
+	PrimitiveVertex vertex1;
+	PrimitiveVertex vertex2;
+	PrimitiveVertex vertex3;
 
 	vertex0.position = sf::Vector2f( std::floor( rect.left + .5f ), std::floor( rect.top + .5f ) );
 	vertex1.position = sf::Vector2f( std::floor( rect.left + .5f ), std::floor( rect.top + .5f ) + std::floor( rect.height + .5f ) );
@@ -404,6 +429,11 @@ Primitive::Ptr Renderer::CreateLine( const sf::Vector2f& begin, const sf::Vector
 	sf::Vector2f unrotated_normal( normal );
 	std::swap( normal.x, normal.y );
 	auto length = std::sqrt( normal.x * normal.x + normal.y * normal.y );
+
+	if( !( length > 0.f ) ) {
+		return std::make_shared<Primitive>();
+	}
+
 	normal.x /= -length;
 	normal.y /= length;
 	unrotated_normal.x /= length;
@@ -422,111 +452,6 @@ Primitive::Ptr Renderer::CreateGLCanvas( std::shared_ptr<Signal> callback ) {
 	primitive->SetCustomDrawCallback( callback );
 	AddPrimitive( primitive );
 	return primitive;
-}
-
-void Renderer::Display( sf::Window& target ) const {
-	m_window_size = target.getSize();
-
-	target.setActive( true );
-
-	glPushClientAttrib( GL_CLIENT_VERTEX_ARRAY_BIT );
-	glPushAttrib( GL_COLOR_BUFFER_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT );
-
-	// Since we have no idea what the attribute environment
-	// of the user looks like, we need to pretend to be SFML
-	// by setting up it's GL attribute environment.
-	glEnable( GL_TEXTURE_2D );
-	glEnable( GL_BLEND );
-	glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA );
-
-	glEnableClientState( GL_VERTEX_ARRAY );
-	glEnableClientState( GL_COLOR_ARRAY );
-	glEnableClientState( GL_TEXTURE_COORD_ARRAY );
-
-	SetupGL();
-
-	DisplayImpl();
-
-	RestoreGL();
-
-	glPopAttrib();
-	glPopClientAttrib();
-}
-
-void Renderer::Display( sf::RenderWindow& target ) const {
-	m_window_size = target.getSize();
-
-	target.setActive( true );
-
-	SetupGL();
-
-	DisplayImpl();
-
-	RestoreGL();
-
-	WipeStateCache( target );
-}
-
-void Renderer::Display( sf::RenderTexture& target ) const {
-	m_window_size = target.getSize();
-
-	target.setActive( true );
-
-	SetupGL();
-
-	DisplayImpl();
-
-	RestoreGL();
-
-	WipeStateCache( target );
-}
-
-void Renderer::SetupGL() const {
-	glMatrixMode( GL_MODELVIEW );
-	glPushMatrix();
-	glLoadIdentity();
-
-	glMatrixMode( GL_PROJECTION );
-	glPushMatrix();
-	glLoadIdentity();
-
-	// When SFML dies (closes) it sets the window size to 0 for some reason.
-	// That then causes glOrtho errors.
-
-	// SFML doesn't seem to bother updating the OpenGL viewport when
-	// it's window resizes and nothing is drawn directly through SFML...
-
-	if( m_last_window_size != m_window_size ) {
-		glViewport( 0, 0, static_cast<GLsizei>( m_window_size.x ), static_cast<GLsizei>( m_window_size.y ) );
-
-		m_last_window_size = m_window_size;
-
-		if( m_window_size.x && m_window_size.y ) {
-			const_cast<Renderer*>( this )->Invalidate( INVALIDATE_VERTEX | INVALIDATE_TEXTURE );
-
-			const_cast<Renderer*>( this )->InvalidateWindow();
-		}
-	}
-
-	glOrtho( 0.0f, static_cast<GLdouble>( m_window_size.x ? m_window_size.x : 1 ), static_cast<GLdouble>( m_window_size.y ? m_window_size.y : 1 ), 0.0f, -1.0f, 64.0f );
-
-	glMatrixMode( GL_TEXTURE );
-	glPushMatrix();
-	glLoadIdentity();
-
-	glEnable( GL_CULL_FACE );
-}
-
-void Renderer::RestoreGL() const {
-	glDisable( GL_CULL_FACE );
-
-	glPopMatrix();
-
-	glMatrixMode( GL_PROJECTION );
-	glPopMatrix();
-
-	glMatrixMode( GL_MODELVIEW );
-	glPopMatrix();
 }
 
 void Renderer::WipeStateCache( sf::RenderTarget& target ) const {
@@ -590,7 +515,7 @@ sf::Vector2f Renderer::LoadFont( const sf::Font& font, unsigned int size ) {
 
 	FontID id( face, size );
 
-	std::map<FontID, Primitive::Texture::Ptr >::iterator iter( m_fonts.find( id ) );
+	std::map<FontID, PrimitiveTexture::Ptr >::iterator iter( m_fonts.find( id ) );
 
 	if( iter != m_fonts.end() ) {
 		return iter->second->offset;
@@ -617,99 +542,127 @@ sf::Vector2f Renderer::LoadFont( const sf::Font& font, unsigned int size ) {
 	return handle->offset;
 }
 
-Primitive::Texture::Ptr Renderer::LoadTexture( const sf::Texture& texture ) {
+PrimitiveTexture::Ptr Renderer::LoadTexture( const sf::Texture& texture ) {
 	return LoadTexture( texture.copyToImage() );
 }
 
-Primitive::Texture::Ptr Renderer::LoadTexture( const sf::Image& image ) {
-	if( ( image.getSize().x > m_max_texture_size ) || ( image.getSize().x > m_max_texture_size ) ) {
-#if defined( SFGUI_DEBUG )
-		std::cerr << "SFGUI warning: The image you are using is larger than the maximum size supported by your GPU (" << m_max_texture_size << "x" << m_max_texture_size << ").\n";
-#endif
-		return std::make_shared<Primitive::Texture>();
-	}
-
+PrimitiveTexture::Ptr Renderer::LoadTexture( const sf::Image& image ) {
 	// We insert padding between atlas elements to prevent
 	// texture filtering from screwing up our images.
 	// If 1 pixel isn't enough, increase.
-	const static unsigned int padding = 1;
+	const static auto padding = 1;
+
+	auto required_vertical_size = static_cast<int>( image.getSize().y ) + padding;
+	auto required_horizontal_size = static_cast<int>( image.getSize().x );
+
+	if( ( required_horizontal_size > max_texture_size ) || ( required_vertical_size > static_cast<int>( max_texture_size ) ) ) {
+#if defined( SFGUI_DEBUG )
+		std::cerr << "SFGUI warning: The image you are using is larger than the maximum size supported by your GPU (" << max_texture_size << "x" << max_texture_size << ").\n";
+#endif
+		return std::make_shared<PrimitiveTexture>();
+	}
 
 	// Look for a nice insertion point for our new texture.
 	// We use first fit and according to theory it is never
 	// worse than double the optimum size.
-	auto iter = m_textures.begin();
+	auto texture_iter = m_textures.begin();
 
-	auto last_occupied_location = 0.f;
+	auto atlas_last_occupied_location = 0;
 
-	for( ; iter != m_textures.end(); ++iter ) {
-		auto space_available = iter->offset.y - last_occupied_location;
+	for( ; texture_iter != m_textures.end(); ++texture_iter ) {
+		auto space_available = texture_iter->offset.y - atlas_last_occupied_location;
 
-		if( space_available >= static_cast<float>( image.getSize().y + 2 * padding ) ) {
+		if( space_available >= required_vertical_size ) {
 			// We found a nice spot.
 			break;
 		}
 
-		last_occupied_location = iter->offset.y + static_cast<float>( iter->size.y );
+		atlas_last_occupied_location = texture_iter->offset.y + texture_iter->size.y;
 	}
 
-	auto current_page = static_cast<std::size_t>( last_occupied_location ) / m_max_texture_size;
-	last_occupied_location = static_cast<float>( static_cast<unsigned int>( last_occupied_location ) % m_max_texture_size );
+	auto current_page_index = atlas_last_occupied_location / max_texture_size;
+	auto current_page_last_occupied_location = atlas_last_occupied_location % max_texture_size;
 
-	if( m_texture_atlas.empty() || ( ( static_cast<unsigned int>( last_occupied_location ) % m_max_texture_size ) + image.getSize().y + 2 * padding > m_max_texture_size ) ) {
+	// Cache the "temporary" sf::Image so its internal std::vector
+	// does not have to constantly be allocated anew.
+	static sf::Image new_image;
+
+	if( m_texture_atlas.empty() || ( current_page_last_occupied_location + required_vertical_size > max_texture_size ) ) {
 		// We need a new atlas page.
-		m_texture_atlas.push_back(
-			std::move(
-				std::unique_ptr<sf::Texture>( new sf::Texture() )
-			)
-		);
 
-		current_page = m_texture_atlas.size() - 1;
+		auto new_texture = std::unique_ptr<sf::Texture>( new sf::Texture );
 
-		last_occupied_location = 0.f;
+		// Protection against possible broken cards that don't like huge textures.
+		// Disable if having issues.
+		static auto create_maximal = true;
+
+		if( create_maximal ) {
+			if( !new_texture->create( 1u, static_cast<unsigned int>( max_texture_size ) ) ) {
+				create_maximal = false;
+			}
+		}
+
+		if( !create_maximal && !m_texture_atlas.empty() ) {
+			// Make sure the current page vertical size is maximal
+			// so we can compute the right page from y texture coordinate.
+			auto current_page = m_texture_atlas[static_cast<std::size_t>( current_page_index )].get();
+			auto old_image = current_page->copyToImage();
+
+			new_image.create( old_image.getSize().x, static_cast<unsigned int>( max_texture_size ), sf::Color::White );
+			new_image.copy( old_image, 0u, 0u );
+			new_image.copy( image, 0u, static_cast<unsigned int>( current_page_last_occupied_location ) );
+
+			current_page->loadFromImage( new_image );
+		}
+
+		// Insert the new page.
+		m_texture_atlas.push_back( std::move( new_texture ) );
+
+		current_page_index = static_cast<int>( m_texture_atlas.size() ) - 1;
+		current_page_last_occupied_location = 0;
 	}
 
-	if( ( image.getSize().x > m_texture_atlas[current_page]->getSize().x ) || ( last_occupied_location + static_cast<float>( image.getSize().y ) > static_cast<float>( m_texture_atlas[current_page]->getSize().y ) ) ) {
+	auto current_page = m_texture_atlas[static_cast<std::size_t>( current_page_index )].get();
+	auto current_page_size_x = static_cast<int>( current_page->getSize().x );
+	auto current_page_size_y = static_cast<int>( current_page->getSize().y );
+
+	if( ( required_horizontal_size > current_page_size_x ) || ( current_page_last_occupied_location + required_vertical_size > current_page_size_y ) ) {
 		// Image is loaded into atlas after expanding texture atlas.
-		auto old_image = m_texture_atlas[current_page]->copyToImage();
-		sf::Image new_image;
+		auto old_image = current_page->copyToImage();
 
-		new_image.create( std::max( old_image.getSize().x, image.getSize().x ), static_cast<unsigned int>( std::floor( last_occupied_location + .5f ) ) + image.getSize().y + padding, sf::Color::White );
-		new_image.copy( old_image, 0, 0 );
+		new_image.create( static_cast<unsigned int>( std::max( current_page_size_x, required_horizontal_size ) ), static_cast<unsigned int>( std::max( current_page_size_y, current_page_last_occupied_location + required_vertical_size ) ), sf::Color::White );
+		new_image.copy( old_image, 0u, 0u );
+		new_image.copy( image, 0u, static_cast<unsigned int>( current_page_last_occupied_location ) );
 
-		new_image.copy( image, 0, static_cast<unsigned int>( std::floor( last_occupied_location + .5f ) ) + padding );
-
-		m_texture_atlas[current_page]->loadFromImage( new_image );
+		current_page->loadFromImage( new_image );
 	}
 	else {
 		// Image is loaded into atlas.
-		auto atlas_image = m_texture_atlas[current_page]->copyToImage();
-
-		atlas_image.copy( image, 0, static_cast<unsigned int>( std::floor( last_occupied_location + .5f ) ) + padding );
-
-		m_texture_atlas[current_page]->loadFromImage( atlas_image );
+		current_page->update( image, 0u, static_cast<unsigned int>( current_page_last_occupied_location ) );
 	}
 
-	auto offset = sf::Vector2f( 0.f, static_cast<float>( current_page * m_max_texture_size ) + last_occupied_location + static_cast<float>( padding ) );
+	auto offset = sf::Vector2i( 0, current_page_index * max_texture_size + current_page_last_occupied_location );
 
 	Invalidate( INVALIDATE_TEXTURE );
 
-	auto handle = std::make_shared<Primitive::Texture>();
+	auto handle = std::make_shared<PrimitiveTexture>();
 
-	handle->offset = offset;
+	handle->offset = static_cast<sf::Vector2f>( offset );
 	handle->size = image.getSize();
 
-	TextureNode texture_node;
+	priv::RendererTextureNode texture_node;
 	texture_node.offset = offset;
-	texture_node.size = image.getSize();
+	texture_node.size = static_cast<sf::Vector2i>( image.getSize() ) + sf::Vector2i( 0, padding );
 
-	m_textures.insert( iter, texture_node );
+	m_textures.insert( texture_iter, texture_node );
 
 	return handle;
 }
 
 void Renderer::UnloadImage( const sf::Vector2f& offset ) {
+	sf::Vector2i int_offset( static_cast<int>( std::floor( offset.x + .5f ) ), static_cast<int>( std::floor( offset.y + .5f ) ) );
 	for( auto iter = m_textures.begin(); iter != m_textures.end(); ++iter ) {
-		if( iter->offset == offset ) {
+		if( iter->offset == int_offset ) {
 			m_textures.erase( iter );
 			return;
 		}
@@ -722,20 +675,26 @@ void Renderer::UnloadImage( const sf::Vector2f& offset ) {
 }
 
 void Renderer::UpdateImage( const sf::Vector2f& offset, const sf::Image& data ) {
+	// We insert padding between atlas elements to prevent
+	// texture filtering from screwing up our images.
+	// If 1 pixel isn't enough, increase.
+	const static auto padding = 1;
+
+	sf::Vector2i int_offset( static_cast<int>( std::floor( offset.x + .5f ) ), static_cast<int>( std::floor( offset.y + .5f ) ) );
+	sf::Vector2i int_size( static_cast<sf::Vector2i>( data.getSize() ) + sf::Vector2i( 0, padding ) );
+
 	for( const auto& texture : m_textures ) {
-		if( texture.offset == offset ) {
-			if( texture.size != data.getSize() ) {
+		if( texture.offset == int_offset ) {
+			if( texture.size != int_size ) {
 #if defined( SFGUI_DEBUG )
 				std::cerr << "Tried to update texture with mismatching image size.\n";
 #endif
 				return;
 			}
 
-			auto page = static_cast<std::size_t>( offset.y ) / m_max_texture_size;
+			auto page = static_cast<std::size_t>( int_offset.y / max_texture_size );
 
-			auto image = m_texture_atlas[page]->copyToImage();
-			image.copy( data, 0, static_cast<unsigned int>( std::floor( offset.y + .5f ) ) % m_max_texture_size );
-			m_texture_atlas[page]->loadFromImage( image );
+			m_texture_atlas[page]->update( data, 0u, static_cast<unsigned int>( int_offset.y % max_texture_size ) );
 
 			return;
 		}
@@ -750,6 +709,10 @@ void Renderer::UpdateImage( const sf::Vector2f& offset, const sf::Image& data ) 
 /// @endcond
 
 void Renderer::SortPrimitives() {
+	if( m_primitives_sorted ) {
+		return;
+	}
+
 	std::size_t current_position = 1;
 	std::size_t sort_index;
 
@@ -764,6 +727,8 @@ void Renderer::SortPrimitives() {
 			--sort_index;
 		}
 	}
+
+	m_primitives_sorted = true;
 }
 
 void Renderer::AddPrimitive( Primitive::Ptr primitive ) {
@@ -771,14 +736,13 @@ void Renderer::AddPrimitive( Primitive::Ptr primitive ) {
 
 	// Check for alpha values in primitive.
 	// Disable depth test if any found.
-	const std::vector<Primitive::Vertex>& vertices( primitive->GetVertices() );
-	const std::vector<GLuint>& indices( primitive->GetIndices() );
+	const std::vector<PrimitiveVertex>& vertices( primitive->GetVertices() );
+	const std::vector<unsigned int>& indices( primitive->GetIndices() );
 
-	auto vertices_size = vertices.size();
-	auto indices_size = indices.size();
+	m_vertex_count += static_cast<int>( vertices.size() );
+	m_index_count += static_cast<int>( indices.size() );
 
-	m_vertex_count += vertices_size;
-	m_index_count += indices_size;
+	m_primitives_sorted = false;
 
 	Invalidate( INVALIDATE_ALL );
 }
@@ -787,14 +751,14 @@ void Renderer::RemovePrimitive( Primitive::Ptr primitive ) {
 	std::vector<Primitive::Ptr>::iterator iter( std::find( m_primitives.begin(), m_primitives.end(), primitive ) );
 
 	if( iter != m_primitives.end() ) {
-		const std::vector<Primitive::Vertex>& vertices( (*iter)->GetVertices() );
-		const std::vector<GLuint>& indices( (*iter)->GetIndices() );
+		const std::vector<PrimitiveVertex>& vertices( (*iter)->GetVertices() );
+		const std::vector<unsigned int>& indices( (*iter)->GetIndices() );
 
-		assert( m_vertex_count >= vertices.size() );
-		assert( m_index_count >= indices.size() );
+		assert( m_vertex_count >= static_cast<int>( vertices.size() ) );
+		assert( m_index_count >= static_cast<int>( indices.size() ) );
 
-		m_vertex_count -= vertices.size();
-		m_index_count -= indices.size();
+		m_vertex_count -= static_cast<int>( vertices.size() );
+		m_index_count -= static_cast<int>( indices.size() );
 
 		m_primitives.erase( iter );
 	}
@@ -810,7 +774,7 @@ void Renderer::Redraw() {
 	m_force_redraw = true;
 }
 
-const sf::Vector2u& Renderer::GetWindowSize() const {
+const sf::Vector2i& Renderer::GetWindowSize() const {
 	return m_last_window_size;
 }
 
@@ -825,7 +789,8 @@ void Renderer::AddCharacterSet( sf::Uint32 low_bound, sf::Uint32 high_bound ) {
 void Renderer::InvalidateImpl( unsigned char /*datasets*/ ) {
 }
 
-void Renderer::InvalidateWindow() {
+int Renderer::GetMaxTextureSize() const {
+	return max_texture_size;
 }
 
 }

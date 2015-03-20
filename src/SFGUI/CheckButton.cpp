@@ -1,11 +1,12 @@
 #include <SFGUI/CheckButton.hpp>
 #include <SFGUI/Context.hpp>
 #include <SFGUI/Engine.hpp>
+#include <SFGUI/RenderQueue.hpp>
 
 namespace sfg {
 
 CheckButton::Ptr CheckButton::Create( const sf::String& label ) {
-	auto widget = std::make_shared<CheckButton>();
+	auto widget = Ptr( new CheckButton );
 	widget->SetLabel( label );
 	return widget;
 }
@@ -32,7 +33,7 @@ sf::Vector2f CheckButton::CalculateRequisition() {
 	sf::Vector2f requisition( box_size, box_size );
 
 	if( GetLabel().getSize() > 0 ) {
-		auto metrics = Context::Get().GetEngine().GetTextMetrics( GetLabel(), font, font_size );
+		auto metrics = Context::Get().GetEngine().GetTextStringMetrics( GetLabel(), font, font_size );
 		requisition.x += metrics.x + spacing;
 		requisition.y = std::max( requisition.y, Context::Get().GetEngine().GetFontLineHeight( font, font_size ) );
 	}

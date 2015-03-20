@@ -1,11 +1,7 @@
 #include <SFGUI/Engines/BREW.hpp>
 #include <SFGUI/RenderQueue.hpp>
-#include <SFGUI/Context.hpp>
 #include <SFGUI/Renderer.hpp>
 
-#include <SFML/Graphics/ConvexShape.hpp>
-#include <SFML/Graphics/Text.hpp>
-#include <SFML/Graphics/Sprite.hpp>
 #include <cmath>
 
 namespace sfg {
@@ -178,7 +174,7 @@ std::unique_ptr<RenderQueue> BREW::CreateBorder( const sf::FloatRect& rect, floa
 	queue->Add(
 		Renderer::Get().CreateLine(
 			sf::Vector2f( rect.left + rect.width, rect.top ),
-			sf::Vector2f( rect.left + rect.width, rect.top + rect.height + border_width ),
+			sf::Vector2f( rect.left + rect.width, rect.top + rect.height ),
 			dark_color,
 			border_width
 		)

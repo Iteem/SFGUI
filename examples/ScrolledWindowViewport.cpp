@@ -1,11 +1,11 @@
-#include <cstdlib>
-
-#include <SFML/Graphics.hpp>
-
 // Always include the necessary header files.
-// Including SFGUI/SFGUI.hpp includes everything
+// Including SFGUI/Widgets.hpp includes everything
 // you can possibly need automatically.
 #include <SFGUI/SFGUI.hpp>
+#include <SFGUI/Widgets.hpp>
+
+#include <SFML/Graphics.hpp>
+#include <cstdlib>
 
 class ScrolledWindowViewportExample {
 	public:
@@ -102,6 +102,10 @@ void ScrolledWindowViewportExample::Run() {
 	window->Add( box );
 
 	sf::Clock clock;
+
+	// Update an initial time to construct the GUI before drawing begins.
+	// This makes sure that there are no frames in which no GUI is visible.
+	window->Update( 0.f );
 
 	// Start the game loop
 	while ( app_window.isOpen() ) {

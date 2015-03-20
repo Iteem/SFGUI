@@ -1,7 +1,7 @@
 #include <SFGUI/Engines/BREW.hpp>
-#include <SFGUI/Context.hpp>
 #include <SFGUI/Renderer.hpp>
 #include <SFGUI/SpinButton.hpp>
+#include <SFGUI/RenderQueue.hpp>
 
 #include <SFML/Graphics/Text.hpp>
 
@@ -95,12 +95,12 @@ std::unique_ptr<RenderQueue> BREW::CreateSpinButtonDrawable( std::shared_ptr<con
 	// Draw cursor if spinbutton is active and cursor is visible.
 	if( spinbutton->HasFocus() && spinbutton->IsCursorVisible() ) {
 		sf::String cursor_string( spinbutton->GetVisibleText() );
-		if( spinbutton->GetCursorPosition() - spinbutton->GetVisibleOffset() < cursor_string.getSize() ) {
-			cursor_string.erase( spinbutton->GetCursorPosition() - spinbutton->GetVisibleOffset(), cursor_string.getSize() );
+		if( spinbutton->GetCursorPosition() - spinbutton->GetVisibleOffset() < static_cast<int>( cursor_string.getSize() ) ) {
+			cursor_string.erase( static_cast<std::size_t>( spinbutton->GetCursorPosition() - spinbutton->GetVisibleOffset() ), cursor_string.getSize() );
 		}
 
 		// Get metrics.
-		sf::Vector2f metrics( GetTextMetrics( cursor_string, *font, font_size ) );
+		sf::Vector2f metrics( GetTextStringMetrics( cursor_string, *font, font_size ) );
 
 		queue->Add(
 			Renderer::Get().CreateRect(

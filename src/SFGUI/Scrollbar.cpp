@@ -1,11 +1,14 @@
 #include <SFGUI/Scrollbar.hpp>
+#include <SFGUI/Adjustment.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Engine.hpp>
+
 #include <limits>
 
 namespace sfg {
 
-Scrollbar::Scrollbar( Adjustment::Ptr adjustment, Orientation orientation ) :
+Scrollbar::Scrollbar( Orientation orientation ) :
 	Range( orientation ),
 	m_elapsed_time( 0.f ),
 	m_slider_click_offset( 0.f ),
@@ -16,17 +19,18 @@ Scrollbar::Scrollbar( Adjustment::Ptr adjustment, Orientation orientation ) :
 	m_increase_pressed( false ),
 	m_repeat_wait( true )
 {
-	if( adjustment ) {
-		SetAdjustment( adjustment );
-	}
 }
 
 Scrollbar::Ptr Scrollbar::Create( Orientation orientation ) {
-	return Ptr( new Scrollbar( Adjustment::Ptr(), orientation ) );
+	auto ptr = Ptr( new Scrollbar( orientation ) );
+	ptr->SetAdjustment( Adjustment::Create() );
+	return ptr;
 }
 
 Scrollbar::Ptr Scrollbar::Create( Adjustment::Ptr adjustment, Orientation orientation ) {
-	return Ptr( new Scrollbar( adjustment, orientation ) );
+	auto ptr = Ptr( new Scrollbar( orientation ) );
+	ptr->SetAdjustment( adjustment );
+	return ptr;
 }
 
 const sf::FloatRect Scrollbar::GetSliderRect() const {
@@ -34,23 +38,19 @@ const sf::FloatRect Scrollbar::GetSliderRect() const {
 
 	Adjustment::Ptr adjustment( GetAdjustment() );
 
-	auto current_value = adjustment->GetValue();
 	auto value_range = std::max( adjustment->GetUpper() - adjustment->GetLower() - adjustment->GetPageSize(), .0f );
-	auto pages = value_range / adjustment->GetPageSize() + 1.f;
+	auto pages = std::max( ( adjustment->GetPageSize() > .0f ) ? ( ( adjustment->GetUpper() - adjustment->GetLower() ) / adjustment->GetPageSize() ) : 1.f, 1.f );
 
 	if( GetOrientation() == Orientation::HORIZONTAL ) {
 		auto stepper_length = GetAllocation().height;
 		auto trough_length = GetAllocation().width - 2.f * stepper_length;
 		auto slider_length = std::max( mimimum_slider_length, trough_length / pages );
-		if( adjustment->GetPageSize() == .0f ) {
-			slider_length = mimimum_slider_length;
-		}
 
-		auto slider_x = stepper_length + ( trough_length - slider_length ) * ( current_value - adjustment->GetLower() ) / value_range;
+		auto slider_x = stepper_length;
 		auto slider_y = 0.f;
 
-		if( value_range == .0f ) {
-			slider_x = stepper_length;
+		if( value_range > .0f ) {
+			slider_x = stepper_length + ( trough_length - slider_length ) * ( adjustment->GetValue() - adjustment->GetLower() ) / value_range;
 		}
 
 		return sf::FloatRect( slider_x, slider_y, slider_length, GetAllocation().height );
@@ -59,15 +59,12 @@ const sf::FloatRect Scrollbar::GetSliderRect() const {
 	auto stepper_length = GetAllocation().width;
 	auto trough_length = GetAllocation().height - 2.f * stepper_length;
 	auto slider_length = std::max( mimimum_slider_length, trough_length / pages );
-	if( adjustment->GetPageSize() == .0f ) {
-		slider_length = mimimum_slider_length;
-	}
 
 	auto slider_x = 0.f;
-	auto slider_y = stepper_length + ( trough_length - slider_length ) * ( current_value - adjustment->GetLower() ) / value_range;
+	auto slider_y = stepper_length;
 
-	if( value_range == .0f ) {
-		slider_y = stepper_length;
+	if( value_range > .0f ) {
+		slider_y = stepper_length + ( trough_length - slider_length ) * ( adjustment->GetValue() - adjustment->GetLower() ) / value_range;
 	}
 
 	return sf::FloatRect( slider_x, slider_y, GetAllocation().width, slider_length );

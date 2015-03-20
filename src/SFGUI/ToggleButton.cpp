@@ -1,5 +1,6 @@
 #include <SFGUI/ToggleButton.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Engine.hpp>
 
 namespace sfg {
@@ -45,8 +46,8 @@ void ToggleButton::SetActive( bool active ) {
 		SetState( State::NORMAL );
 	}
 
-	GetSignals().Emit( OnToggle );
 	Invalidate();
+	GetSignals().Emit( OnToggle );
 }
 
 bool ToggleButton::IsActive() const {

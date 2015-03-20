@@ -1,88 +1,58 @@
-// Needs to be included before GLEW for NOMINMAX
+// Needs to be included before GLLoader for NOMINMAX
 #include <SFGUI/Config.hpp>
 
 // Needs to be included before OpenGL (so anything else)
-#include <GL/glew.h>
+#include <SFGUI/GLLoader.hpp>
 
 // X headers define None which is used by SFML's window style.
 #undef None
 
 #include <SFGUI/Renderers/VertexBufferRenderer.hpp>
+#include <SFGUI/RendererBatch.hpp>
 #include <SFGUI/RendererViewport.hpp>
+#include <SFGUI/Signal.hpp>
+#include <SFGUI/Primitive.hpp>
+#include <SFGUI/PrimitiveVertex.hpp>
+#include <SFGUI/GLCheck.hpp>
+
+#include <SFML/Graphics/Color.hpp>
+#include <SFML/Graphics/Texture.hpp>
+#include <SFML/Graphics/RenderWindow.hpp>
+#include <SFML/Graphics/RenderTexture.hpp>
+#include <SFML/Window/Context.hpp>
+#include <SFML/System/Vector3.hpp>
+
+#define GLEXT_framebuffer_object sfgogl_ext_EXT_framebuffer_object
+
+#define GLEXT_GL_FRAMEBUFFER GL_FRAMEBUFFER_EXT
+#define GLEXT_GL_FRAMEBUFFER_COMPLETE GL_FRAMEBUFFER_COMPLETE_EXT
+#define GLEXT_GL_COLOR_ATTACHMENT0 GL_COLOR_ATTACHMENT0_EXT
+
+#define GLEXT_glGenFramebuffers glGenFramebuffersEXT
+#define GLEXT_glDeleteFramebuffers glDeleteFramebuffersEXT
+#define GLEXT_glBindFramebuffer glBindFramebufferEXT
+#define GLEXT_glFramebufferTexture2D glFramebufferTexture2DEXT
+#define GLEXT_glCheckFramebufferStatus glCheckFramebufferStatusEXT
+
+#define GLEXT_vertex_buffer_object sfgogl_ext_ARB_vertex_buffer_object
+
+#define GLEXT_GL_ARRAY_BUFFER GL_ARRAY_BUFFER_ARB
+#define GLEXT_GL_ELEMENT_ARRAY_BUFFER GL_ELEMENT_ARRAY_BUFFER_ARB
+#define GLEXT_GL_DYNAMIC_DRAW GL_DYNAMIC_DRAW_ARB
+
+#define GLEXT_glGenBuffers glGenBuffersARB
+#define GLEXT_glDeleteBuffers glDeleteBuffersARB
+#define GLEXT_glBindBuffer glBindBufferARB
+#define GLEXT_glBufferData glBufferDataARB
+#define GLEXT_glBufferSubData glBufferSubDataARB
+
+namespace {
+
+bool gl_initialized = false;
+
+}
 
 namespace sfg {
-
-// Although it has the ARB prefix, this is a core extension promoted from EXT.
-#if defined( GLEW_ARB_framebuffer_object )
-
-	#define GLEXT_GLEW_framebuffer_object GLEW_ARB_framebuffer_object
-
-	#define GLEXT_GL_FRAMEBUFFER GL_FRAMEBUFFER
-	#define GLEXT_GL_FRAMEBUFFER_COMPLETE GL_FRAMEBUFFER_COMPLETE
-	#define GLEXT_GL_COLOR_ATTACHMENT0 GL_COLOR_ATTACHMENT0
-
-	#define GLEXT_glGenFramebuffers glGenFramebuffers
-	#define GLEXT_glDeleteFramebuffers glDeleteFramebuffers
-	#define GLEXT_glBindFramebuffer glBindFramebuffer
-	#define GLEXT_glFramebufferTexture2D glFramebufferTexture2D
-	#define GLEXT_glCheckFramebufferStatus glCheckFramebufferStatus
-
-#elif defined( GLEW_EXT_framebuffer_object )
-
-	#define GLEXT_GLEW_framebuffer_object GLEW_EXT_framebuffer_object
-
-	#define GLEXT_GL_FRAMEBUFFER GL_FRAMEBUFFER_EXT
-	#define GLEXT_GL_FRAMEBUFFER_COMPLETE GL_FRAMEBUFFER_COMPLETE_EXT
-	#define GLEXT_GL_COLOR_ATTACHMENT0 GL_COLOR_ATTACHMENT0_EXT
-
-	#define GLEXT_glGenFramebuffers glGenFramebuffersEXT
-	#define GLEXT_glDeleteFramebuffers glDeleteFramebuffersEXT
-	#define GLEXT_glBindFramebuffer glBindFramebufferEXT
-	#define GLEXT_glFramebufferTexture2D glFramebufferTexture2DEXT
-	#define GLEXT_glCheckFramebufferStatus glCheckFramebufferStatusEXT
-
-#else
-
-	#error You have a version of GLEW that is too old for SFGUI. Please update it.
-
-#endif
-
-// VBO support promoted to core from ARB in 1.5.
-#if defined( GLEW_VERSION_1_5 )
-
-	#define GLEXT_GLEW_vertex_buffer_object GLEW_VERSION_1_5
-
-	#define GLEXT_GL_ARRAY_BUFFER GL_ARRAY_BUFFER
-	#define GLEXT_GL_ELEMENT_ARRAY_BUFFER GL_ELEMENT_ARRAY_BUFFER
-	#define GLEXT_GL_DYNAMIC_DRAW GL_DYNAMIC_DRAW
-
-	#define GLEXT_glGenBuffers glGenBuffers
-	#define GLEXT_glDeleteBuffers glDeleteBuffers
-	#define GLEXT_glBindBuffer glBindBuffer
-	#define GLEXT_glBufferData glBufferData
-	#define GLEXT_glBufferSubData glBufferSubData
-
-#elif defined( GLEW_ARB_vertex_buffer_object )
-
-	#define GLEXT_GLEW_vertex_buffer_object GLEW_ARB_vertex_buffer_object
-
-	#define GLEXT_GL_ARRAY_BUFFER GL_ARRAY_BUFFER_ARB
-	#define GLEXT_GL_ELEMENT_ARRAY_BUFFER GL_ELEMENT_ARRAY_BUFFER_ARB
-	#define GLEXT_GL_DYNAMIC_DRAW GL_DYNAMIC_DRAW_ARB
-
-	#define GLEXT_glGenBuffers glGenBuffersARB
-	#define GLEXT_glDeleteBuffers glDeleteBuffersARB
-	#define GLEXT_glBindBuffer glBindBufferARB
-	#define GLEXT_glBufferData glBufferDataARB
-	#define GLEXT_glBufferSubData glBufferSubDataARB
-
-#else
-
-	#error You have a version of GLEW that is too old for SFGUI. Please update it.
-
-#endif
-
-bool VertexBufferRenderer::m_glew_initialized = false;
 
 VertexBufferRenderer::VertexBufferRenderer() :
 	m_frame_buffer( 0 ),
@@ -99,29 +69,29 @@ VertexBufferRenderer::VertexBufferRenderer() :
 	m_fbo_supported( false ) {
 
 	// Make sure we have a valid GL context before messing around
-	// with GLEW or else it will report missing extensions sometimes.
+	// with GLLoader or else it will report missing extensions sometimes.
 	sf::Context context;
 
-	if( !m_glew_initialized ) {
-		auto result = glewInit();
+	if( !gl_initialized ) {
+		auto result = sfgogl_LoadFunctions() - sfgogl_LOAD_SUCCEEDED;
 
-		if( result != GLEW_OK ) {
+		if( result ) {
 #if defined( SFGUI_DEBUG )
-			std::cerr << "GLEW initialization failed: " << glewGetErrorString( result ) << "\n";
+			std::cerr << "GL extension initialization failed. Missing " << result << " functions.\n";
 #endif
 			return;
 		}
 
-		m_glew_initialized = true;
+		gl_initialized = true;
 	}
 
-	if( GLEXT_GLEW_vertex_buffer_object ) {
+	if( GLEXT_vertex_buffer_object ) {
 		m_vbo_supported = true;
 
-		GLEXT_glGenBuffers( 1, &m_vertex_vbo );
-		GLEXT_glGenBuffers( 1, &m_color_vbo );
-		GLEXT_glGenBuffers( 1, &m_texture_vbo );
-		GLEXT_glGenBuffers( 1, &m_index_vbo );
+		CheckGLError( GLEXT_glGenBuffers( 1, &m_vertex_vbo ) );
+		CheckGLError( GLEXT_glGenBuffers( 1, &m_color_vbo ) );
+		CheckGLError( GLEXT_glGenBuffers( 1, &m_texture_vbo ) );
+		CheckGLError( GLEXT_glGenBuffers( 1, &m_index_vbo ) );
 	}
 	else {
 #if defined( SFGUI_DEBUG )
@@ -129,7 +99,7 @@ VertexBufferRenderer::VertexBufferRenderer() :
 #endif
 	}
 
-	if( GLEXT_GLEW_framebuffer_object ) {
+	if( GLEXT_framebuffer_object ) {
 		m_fbo_supported = true;
 	}
 }
@@ -138,11 +108,15 @@ VertexBufferRenderer::~VertexBufferRenderer() {
 	DestroyFBO();
 
 	if( m_vbo_supported ) {
-		GLEXT_glDeleteBuffers( 1, &m_index_vbo );
-		GLEXT_glDeleteBuffers( 1, &m_texture_vbo );
-		GLEXT_glDeleteBuffers( 1, &m_color_vbo );
-		GLEXT_glDeleteBuffers( 1, &m_vertex_vbo );
+		CheckGLError( GLEXT_glDeleteBuffers( 1, &m_index_vbo ) );
+		CheckGLError( GLEXT_glDeleteBuffers( 1, &m_texture_vbo ) );
+		CheckGLError( GLEXT_glDeleteBuffers( 1, &m_color_vbo ) );
+		CheckGLError( GLEXT_glDeleteBuffers( 1, &m_vertex_vbo ) );
 	}
+}
+
+VertexBufferRenderer::Ptr VertexBufferRenderer::Create() {
+	return Ptr( new VertexBufferRenderer );
 }
 
 const std::string& VertexBufferRenderer::GetName() const {
@@ -152,27 +126,72 @@ const std::string& VertexBufferRenderer::GetName() const {
 
 bool VertexBufferRenderer::IsAvailable() {
 	// Make sure we have a valid GL context before messing around
-	// with GLEW or else it will report missing extensions sometimes.
+	// with GLLoader or else it will report missing extensions sometimes.
 	sf::Context context;
 
-	if( !m_glew_initialized ) {
-		auto result = glewInit();
+	if( !gl_initialized ) {
+		auto result = sfgogl_LoadFunctions() - sfgogl_LOAD_SUCCEEDED;
 
-		if( result != GLEW_OK ) {
+		if( result ) {
 #if defined( SFGUI_DEBUG )
-			std::cerr << "GLEW initialization failed: " << glewGetErrorString( result ) << "\n";
+			std::cerr << "GL extension initialization failed. Missing " << result << " functions.\n";
 #endif
 			return false;
 		}
 
-		m_glew_initialized = true;
+		gl_initialized = true;
 	}
 
-	if( GLEXT_GLEW_vertex_buffer_object ) {
+	if( GLEXT_vertex_buffer_object ) {
 		return true;
 	}
 
 	return false;
+}
+
+void VertexBufferRenderer::Display( sf::Window& target ) const {
+	m_window_size = static_cast<sf::Vector2i>( target.getSize() );
+
+	target.setActive( true );
+
+	CheckGLError( glPushClientAttrib( GL_CLIENT_VERTEX_ARRAY_BIT ) );
+	CheckGLError( glPushAttrib( GL_COLOR_BUFFER_BIT | GL_ENABLE_BIT | GL_TEXTURE_BIT ) );
+
+	// Since we have no idea what the attribute environment
+	// of the user looks like, we need to pretend to be SFML
+	// by setting up it's GL attribute environment.
+	CheckGLError( glEnable( GL_TEXTURE_2D ) );
+	CheckGLError( glEnable( GL_BLEND ) );
+	CheckGLError( glBlendFunc( GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA ) );
+
+	CheckGLError( glEnableClientState( GL_VERTEX_ARRAY ) );
+	CheckGLError( glEnableClientState( GL_COLOR_ARRAY ) );
+	CheckGLError( glEnableClientState( GL_TEXTURE_COORD_ARRAY ) );
+
+	DisplayImpl();
+
+	CheckGLError( glPopAttrib() );
+	CheckGLError( glPopClientAttrib() );
+}
+
+void VertexBufferRenderer::Display( sf::RenderWindow& target ) const {
+	m_window_size = static_cast<sf::Vector2i>( target.getSize() );
+
+	target.setActive( true );
+
+	DisplayImpl();
+
+	WipeStateCache( target );
+}
+
+void VertexBufferRenderer::Display( sf::RenderTexture& target ) const {
+	m_window_size = static_cast<sf::Vector2i>( target.getSize() );
+
+	target.setActive( true );
+
+	DisplayImpl();
+
+	WipeStateCache( target );
 }
 
 void VertexBufferRenderer::DisplayImpl() const {
@@ -180,9 +199,41 @@ void VertexBufferRenderer::DisplayImpl() const {
 		return;
 	}
 
+	CheckGLError( glMatrixMode( GL_MODELVIEW ) );
+	CheckGLError( glPushMatrix() );
+	CheckGLError( glLoadIdentity() );
+
+	CheckGLError( glMatrixMode( GL_PROJECTION ) );
+	CheckGLError( glPushMatrix() );
+	CheckGLError( glLoadIdentity() );
+
+	// When SFML dies (closes) it sets the window size to 0 for some reason.
+	// That then causes glOrtho errors.
+
+	// SFML doesn't seem to bother updating the OpenGL viewport when
+	// it's window resizes and nothing is drawn directly through SFML...
+
+	if( m_last_window_size != m_window_size ) {
+		CheckGLError( glViewport( 0, 0, m_window_size.x, m_window_size.y ) );
+
+		m_last_window_size = m_window_size;
+
+		if( m_window_size.x && m_window_size.y ) {
+			const_cast<VertexBufferRenderer*>( this )->Invalidate( INVALIDATE_VERTEX | INVALIDATE_TEXTURE );
+
+			const_cast<VertexBufferRenderer*>( this )->SetupFBO( m_window_size.x, m_window_size.y );
+		}
+	}
+
+	CheckGLError( glOrtho( 0.0f, static_cast<GLdouble>( m_window_size.x ? m_window_size.x : 1 ), static_cast<GLdouble>( m_window_size.y ? m_window_size.y : 1 ), 0.0f, -1.0f, 64.0f ) );
+
+	CheckGLError( glMatrixMode( GL_TEXTURE ) );
+	CheckGLError( glPushMatrix() );
+	CheckGLError( glLoadIdentity() );
+
 	if( m_alpha_threshold > 0.f ) {
-		glAlphaFunc( GL_GREATER, m_alpha_threshold );
-		glEnable( GL_ALPHA_TEST );
+		CheckGLError( glAlphaFunc( GL_GREATER, m_alpha_threshold ) );
+		CheckGLError( glEnable( GL_ALPHA_TEST ) );
 	}
 
 	if( !m_vbo_synced ) {
@@ -208,31 +259,31 @@ void VertexBufferRenderer::DisplayImpl() const {
 		// Further, we stick all referenced textures into our giant atlas
 		// so we don't have to rebind during the draw.
 
-		GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_vertex_vbo );
-		glVertexPointer( 2, GL_FLOAT, 0, 0 );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_vertex_vbo ) );
+		CheckGLError( glVertexPointer( 2, GL_FLOAT, 0, 0 ) );
 
-		GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_color_vbo );
-		glColorPointer( 4, GL_UNSIGNED_BYTE, 0, 0 );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_color_vbo ) );
+		CheckGLError( glColorPointer( 4, GL_UNSIGNED_BYTE, 0, 0 ) );
 
-		GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_texture_vbo );
-		glTexCoordPointer( 2, GL_FLOAT, 0, 0 );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_texture_vbo ) );
+		CheckGLError( glTexCoordPointer( 2, GL_FLOAT, 0, 0 ) );
 
-		GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, m_index_vbo );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, m_index_vbo ) );
 
 		// Not needed, constantly kept enabled by SFML... -_-
-		//glEnableClientState( GL_VERTEX_ARRAY );
-		//glEnableClientState( GL_COLOR_ARRAY );
-		//glEnableClientState( GL_TEXTURE_COORD_ARRAY );
+		//CheckGLError( glEnableClientState( GL_VERTEX_ARRAY ) );
+		//CheckGLError( glEnableClientState( GL_COLOR_ARRAY ) );
+		//CheckGLError( glEnableClientState( GL_TEXTURE_COORD_ARRAY ) );
 
 		if( m_use_fbo ) {
-			GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, m_frame_buffer );
+			CheckGLError( GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, m_frame_buffer ) );
 
-			glClear( GL_COLOR_BUFFER_BIT );
+			CheckGLError( glClear( GL_COLOR_BUFFER_BIT ) );
 		}
 
-		glEnable( GL_SCISSOR_TEST );
+		CheckGLError( glEnable( GL_SCISSOR_TEST ) );
 
-		std::size_t current_atlas_page = 0;
+		auto current_atlas_page = 0;
 
 		sf::Texture::bind( m_texture_atlas[0].get() );
 
@@ -240,96 +291,104 @@ void VertexBufferRenderer::DisplayImpl() const {
 			auto viewport = batch.viewport;
 
 			if( batch.custom_draw ) {
-				sf::Vector2i destination( viewport->GetDestinationOrigin() );
-				sf::Vector2u size( viewport->GetSize() );
+				auto destination = static_cast<sf::Vector2i>( viewport->GetDestinationOrigin() );
+				auto size = static_cast<sf::Vector2i>( viewport->GetSize() );
 
-				glViewport( destination.x, m_window_size.y - destination.y - size.y, size.x, size.y );
+				CheckGLError( glViewport( destination.x, m_window_size.y - destination.y - size.y, size.x, size.y ) );
 
 				// Draw canvas.
 				( *batch.custom_draw_callback )();
 
-				glViewport( 0, 0, m_window_size.x, m_window_size.y );
+				CheckGLError( glViewport( 0, 0, m_window_size.x, m_window_size.y ) );
 
-				sf::Texture::bind( m_texture_atlas[current_atlas_page].get() );
+				sf::Texture::bind( m_texture_atlas[static_cast<std::size_t>( current_atlas_page )].get() );
 			}
 			else {
 				if( viewport && ( ( *viewport ) != ( *m_default_viewport ) ) ) {
 					auto destination_origin = viewport->GetDestinationOrigin();
 					auto size = viewport->GetSize();
 
-					glScissor(
+					CheckGLError( glScissor(
 						static_cast<int>( destination_origin.x ),
 						m_window_size.y - static_cast<int>( destination_origin.y + size.y ),
 						static_cast<int>( size.x ),
 						static_cast<int>( size.y )
-					);
+					) );
 				}
 				else {
-					glScissor( 0, 0, m_window_size.x, m_window_size.y );
+					CheckGLError( glScissor( 0, 0, m_window_size.x, m_window_size.y ) );
 				}
 
 				if( batch.index_count ) {
 					if( batch.atlas_page != current_atlas_page ) {
 						current_atlas_page = batch.atlas_page;
 
-						sf::Texture::bind( m_texture_atlas[current_atlas_page].get() );
+						sf::Texture::bind( m_texture_atlas[static_cast<std::size_t>( current_atlas_page )].get() );
 					}
 
-					glDrawRangeElements(
+					CheckGLError( glDrawRangeElements(
 						GL_TRIANGLES,
-						batch.min_index,
-						batch.max_index,
+						static_cast<unsigned int>( batch.min_index ),
+						static_cast<unsigned int>( batch.max_index ),
 						batch.index_count,
 						GL_UNSIGNED_INT,
-						reinterpret_cast<const GLvoid*>( batch.start_index * sizeof( GLuint ) )
-					);
+						reinterpret_cast<const GLvoid*>( static_cast<std::size_t>( batch.start_index ) * sizeof( GLuint ) )
+					) );
 				}
 			}
 		}
 
-		glDisable( GL_SCISSOR_TEST );
+		CheckGLError( glDisable( GL_SCISSOR_TEST ) );
 
 
-		//glDisableClientState( GL_TEXTURE_COORD_ARRAY );
-		//glDisableClientState( GL_COLOR_ARRAY );
-		//glDisableClientState( GL_VERTEX_ARRAY );
+		//CheckGLError( glDisableClientState( GL_TEXTURE_COORD_ARRAY ) );
+		//CheckGLError( glDisableClientState( GL_COLOR_ARRAY ) );
+		//CheckGLError( glDisableClientState( GL_VERTEX_ARRAY ) );
 
 		// Needed otherwise SFML will blow up...
-		GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, 0 );
-		GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, 0 );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, 0 ) );
+		CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, 0 ) );
 
 		if( m_use_fbo ) {
-			GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, 0 );
+			CheckGLError( GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, 0 ) );
 
-			glCallList( m_display_list );
+			CheckGLError( glCallList( m_display_list ) );
 		}
 
 		m_force_redraw = false;
 	}
 	else {
-		glCallList( m_display_list );
+		CheckGLError( glCallList( m_display_list ) );
 	}
 
 	m_vbo_synced = true;
 
 	if( m_alpha_threshold > 0.f ) {
-		glDisable( GL_ALPHA_TEST );
-		glAlphaFunc( GL_GREATER, 0.f );
+		CheckGLError( glDisable( GL_ALPHA_TEST ) );
+		CheckGLError( glAlphaFunc( GL_GREATER, 0.f ) );
 	}
+
+	CheckGLError( glPopMatrix() );
+
+	CheckGLError( glMatrixMode( GL_PROJECTION ) );
+	CheckGLError( glPopMatrix() );
+
+	CheckGLError( glMatrixMode( GL_MODELVIEW ) );
+	CheckGLError( glPopMatrix() );
 }
 
 void VertexBufferRenderer::RefreshVBO() {
 	SortPrimitives();
 
-	std::vector<sf::Vector2f> vertex_data;
-	std::vector<sf::Color> color_data;
-	std::vector<sf::Vector2f> texture_data;
-	std::vector<GLuint> index_data;
+	m_vertex_data.clear();
+	m_color_data.clear();
+	m_texture_data.clear();
+	m_index_data.clear();
 
-	vertex_data.reserve( m_vertex_count );
-	color_data.reserve( m_vertex_count );
-	texture_data.reserve( m_vertex_count );
-	index_data.reserve( m_index_count );
+	m_vertex_data.reserve( static_cast<std::size_t>( m_vertex_count ) );
+	m_color_data.reserve( static_cast<std::size_t>( m_vertex_count ) );
+	m_texture_data.reserve( static_cast<std::size_t>( m_vertex_count ) );
+	m_index_data.reserve( static_cast<std::size_t>( m_index_count ) );
 
 	m_batches.clear();
 
@@ -337,19 +396,22 @@ void VertexBufferRenderer::RefreshVBO() {
 	m_last_index_count = 0;
 
 	// Default viewport
-	Batch current_batch;
+	priv::RendererBatch current_batch;
 	current_batch.viewport = m_default_viewport;
 	current_batch.atlas_page = 0;
 	current_batch.start_index = 0;
 	current_batch.index_count = 0;
 	current_batch.min_index = 0;
-	current_batch.max_index = static_cast<GLuint>( m_vertex_count - 1 );
+	current_batch.max_index = m_vertex_count - 1;
 	current_batch.custom_draw = false;
 
 	sf::FloatRect window_viewport( 0.f, 0.f, static_cast<float>( m_window_size.x ), static_cast<float>( m_window_size.y ) );
 
+	const auto max_texture_size = GetMaxTextureSize();
+	const auto default_texture_size = m_texture_atlas[0]->getSize();
+
 	for( const auto& primitive_ptr : m_primitives ) {
-		Primitive* primitive = primitive_ptr.get();
+		auto primitive = primitive_ptr.get();
 
 		primitive->SetSynced();
 
@@ -357,18 +419,16 @@ void VertexBufferRenderer::RefreshVBO() {
 			continue;
 		}
 
-		sf::Vector2f position_transform( primitive->GetPosition() );
+		auto position_transform = primitive->GetPosition();
 
 		auto viewport = primitive->GetViewport();
-
-		std::size_t atlas_page = 0;
 
 		auto viewport_rect = window_viewport;
 
 		// Check if primitive needs to be rendered in a custom viewport.
 		if( viewport && ( ( *viewport ) != ( *m_default_viewport ) ) ) {
-			sf::Vector2f destination_origin( viewport->GetDestinationOrigin() );
-			sf::Vector2f size( viewport->GetSize() );
+			auto destination_origin = viewport->GetDestinationOrigin();
+			auto size = viewport->GetSize();
 
 			position_transform += ( destination_origin - viewport->GetSourceOrigin() );
 
@@ -380,11 +440,11 @@ void VertexBufferRenderer::RefreshVBO() {
 			}
 		}
 
-		const std::shared_ptr<Signal>& custom_draw_callback( primitive->GetCustomDrawCallback() );
+		const auto& custom_draw_callback = primitive->GetCustomDrawCallback();
 
 		if( custom_draw_callback ) {
 			// Start a new batch.
-			current_batch.max_index = m_last_vertex_count ? ( static_cast<GLuint>( m_last_vertex_count ) - 1 ) : 0;
+			current_batch.max_index = m_last_vertex_count ? ( m_last_vertex_count - 1 ) : 0;
 			m_batches.push_back( current_batch );
 
 			// Mark current_batch custom draw batch.
@@ -403,32 +463,43 @@ void VertexBufferRenderer::RefreshVBO() {
 			current_batch.viewport = m_default_viewport;
 			current_batch.start_index = m_last_index_count;
 			current_batch.index_count = 0;
-			current_batch.min_index = m_last_vertex_count ? ( static_cast<GLuint>( m_last_vertex_count ) - 1 ) : 0;
+			current_batch.min_index = m_last_vertex_count ? ( m_last_vertex_count - 1 ) : 0;
 			current_batch.custom_draw = false;
 		}
 		else {
 			// Process primitive's vertices and indices
-			const std::vector<Primitive::Vertex>& vertices( primitive->GetVertices() );
+			const std::vector<PrimitiveVertex>& vertices( primitive->GetVertices() );
 			const std::vector<GLuint>& indices( primitive->GetIndices() );
 
 			sf::Vector2f position( 0.f, 0.f );
 
 			sf::FloatRect bounding_rect( 0.f, 0.f, 0.f, 0.f );
 
-			for( const auto& vertex : vertices ) {
+			auto atlas_page = 0;
+
+			const auto vertices_size = vertices.size();
+			sf::Vector2f normalizer;
+
+			for( std::size_t index = 0; index < vertices_size; ++index ) {
+				const auto vertex = vertices[index];
 				position.x = vertex.position.x + position_transform.x;
 				position.y = vertex.position.y + position_transform.y;
 
-				vertex_data.push_back( position );
-				color_data.push_back( vertex.color );
+				m_vertex_data.push_back( position );
+				m_color_data.push_back( vertex.color );
 
-				atlas_page = static_cast<unsigned int>( vertex.texture_coordinate.y ) / m_max_texture_size;
+				// The bound texture can only change between triangles.
+				if( index % 3 == 0 ) {
+					atlas_page = static_cast<int>( vertex.texture_coordinate.y ) / max_texture_size;
+					auto texture_size = ( vertex.texture_coordinate.y <= 1.f ) ? default_texture_size : m_texture_atlas[static_cast<std::size_t>( atlas_page )]->getSize();
 
-				// Used to normalize texture coordinates.
-				sf::Vector2f normalizer( 1.f / static_cast<float>( m_texture_atlas[atlas_page]->getSize().x ), 1.f / static_cast<float>( m_texture_atlas[atlas_page]->getSize().y ) );
+					// Used to normalize texture coordinates.
+					normalizer.x = 1.f / static_cast<float>( texture_size.x );
+					normalizer.y = 1.f / static_cast<float>( texture_size.y );
+				}
 
 				// Normalize SFML's pixel texture coordinates.
-				texture_data.push_back( sf::Vector2f( vertex.texture_coordinate.x * normalizer.x, static_cast<float>( static_cast<unsigned int>( vertex.texture_coordinate.y ) % m_max_texture_size ) * normalizer.y ) );
+				m_texture_data.emplace_back( vertex.texture_coordinate.x * normalizer.x, static_cast<float>( static_cast<int>( vertex.texture_coordinate.y ) % max_texture_size ) * normalizer.y );
 
 				// Update the bounding rect.
 				if( m_cull ) {
@@ -451,18 +522,18 @@ void VertexBufferRenderer::RefreshVBO() {
 			}
 
 			if( m_cull && !viewport_rect.intersects( bounding_rect ) ) {
-				vertex_data.resize( m_last_vertex_count );
-				color_data.resize( m_last_vertex_count );
-				texture_data.resize( m_last_vertex_count );
+				m_vertex_data.resize( static_cast<std::size_t>( m_last_vertex_count ) );
+				m_color_data.resize( static_cast<std::size_t>( m_last_vertex_count ) );
+				m_texture_data.resize( static_cast<std::size_t>( m_last_vertex_count ) );
 			}
 			else {
 				for( const auto& index : indices ) {
-					index_data.push_back( m_last_vertex_count + index );
+					m_index_data.push_back( static_cast<unsigned int>( m_last_vertex_count ) + index );
 				}
 
 				// Check if we need to start a new batch.
 				if( ( ( *viewport ) != ( *current_batch.viewport ) ) || ( atlas_page != current_batch.atlas_page ) ) {
-					current_batch.max_index = m_last_vertex_count ? ( static_cast<GLuint>( m_last_vertex_count ) - 1 ) : 0;
+					current_batch.max_index = m_last_vertex_count ? ( m_last_vertex_count - 1 ) : 0;
 					m_batches.push_back( current_batch );
 
 					// Reset current_batch to defaults.
@@ -470,11 +541,11 @@ void VertexBufferRenderer::RefreshVBO() {
 					current_batch.atlas_page = atlas_page;
 					current_batch.start_index = m_last_index_count;
 					current_batch.index_count = 0;
-					current_batch.min_index = m_last_vertex_count ? ( static_cast<GLuint>( m_last_vertex_count ) - 1 ) : 0;
+					current_batch.min_index = m_last_vertex_count ? ( m_last_vertex_count - 1 ) : 0;
 					current_batch.custom_draw = false;
 				}
 
-				current_batch.index_count += static_cast<unsigned int>( indices.size() );
+				current_batch.index_count += static_cast<int>( indices.size() );
 
 				m_last_vertex_count += static_cast<GLsizei>( vertices.size() );
 				m_last_index_count += static_cast<GLsizei>( indices.size() );
@@ -482,50 +553,54 @@ void VertexBufferRenderer::RefreshVBO() {
 		}
 	}
 
-	current_batch.max_index = m_last_vertex_count ? ( static_cast<GLuint>( m_last_vertex_count ) - 1 ) : 0;
+	current_batch.max_index = m_last_vertex_count ? ( m_last_vertex_count - 1 ) : 0;
 	m_batches.push_back( current_batch );
 
-	if( !vertex_data.empty() && !color_data.empty() && !texture_data.empty() ) {
+	if( !m_vertex_data.empty() && !m_color_data.empty() && !m_texture_data.empty() ) {
 		if( m_vbo_sync_type & INVALIDATE_VERTEX ) {
 			// Sync vertex data
-			GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_vertex_vbo );
-			GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, vertex_data.size() * sizeof( sf::Vector3f ), 0, GLEXT_GL_DYNAMIC_DRAW );
+			CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_vertex_vbo ) );
+			CheckGLError( GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, static_cast<int>( m_vertex_data.size() * sizeof( sf::Vector3f ) ), 0, GLEXT_GL_DYNAMIC_DRAW ) );
 
-			if( vertex_data.size() > 0 ) {
-				GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, vertex_data.size() * sizeof( sf::Vector2f ), &vertex_data[0] );
+			if( m_vertex_data.size() > 0 ) {
+				CheckGLError( GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, static_cast<int>( m_vertex_data.size() * sizeof( sf::Vector2f ) ), m_vertex_data.data() ) );
 			}
 		}
 
 		if( m_vbo_sync_type & INVALIDATE_COLOR ) {
 			// Sync color data
-			GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_color_vbo );
-			GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, color_data.size() * sizeof( sf::Color ), 0, GLEXT_GL_DYNAMIC_DRAW );
+			CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_color_vbo ) );
+			CheckGLError( GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, static_cast<int>( m_color_data.size() * sizeof( sf::Color ) ), 0, GLEXT_GL_DYNAMIC_DRAW ) );
 
-			if( color_data.size() > 0 ) {
-				GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, color_data.size() * sizeof( sf::Color ), &color_data[0] );
+			if( m_color_data.size() > 0 ) {
+				CheckGLError( GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, static_cast<int>( m_color_data.size() * sizeof( sf::Color ) ), m_color_data.data() ) );
 			}
 		}
 
 		if( m_vbo_sync_type & INVALIDATE_TEXTURE ) {
 			// Sync texture coord data
-			GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_texture_vbo );
-			GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, texture_data.size() * sizeof( sf::Vector2f ), 0, GLEXT_GL_DYNAMIC_DRAW );
+			CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, m_texture_vbo ) );
+			CheckGLError( GLEXT_glBufferData( GLEXT_GL_ARRAY_BUFFER, static_cast<int>( m_texture_data.size() * sizeof( sf::Vector2f ) ), 0, GLEXT_GL_DYNAMIC_DRAW ) );
 
-			if( texture_data.size() > 0 ) {
-				GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, texture_data.size() * sizeof( sf::Vector2f ), &texture_data[0] );
+			if( m_texture_data.size() > 0 ) {
+				CheckGLError( GLEXT_glBufferSubData( GLEXT_GL_ARRAY_BUFFER, 0, static_cast<int>( m_texture_data.size() * sizeof( sf::Vector2f ) ), m_texture_data.data() ) );
 			}
 		}
 
 		if( m_vbo_sync_type & INVALIDATE_INDEX ) {
 			// Sync index data
-			GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, m_index_vbo );
-			GLEXT_glBufferData( GLEXT_GL_ELEMENT_ARRAY_BUFFER, index_data.size() * sizeof( GLuint ), 0, GLEXT_GL_DYNAMIC_DRAW );
+			CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, m_index_vbo ) );
+			CheckGLError( GLEXT_glBufferData( GLEXT_GL_ELEMENT_ARRAY_BUFFER, static_cast<int>( m_index_data.size() * sizeof( GLuint ) ), 0, GLEXT_GL_DYNAMIC_DRAW ) );
 
-			if( index_data.size() > 0 ) {
-				GLEXT_glBufferSubData( GLEXT_GL_ELEMENT_ARRAY_BUFFER, 0, index_data.size() * sizeof( GLuint ), &index_data[0] );
+			if( m_index_data.size() > 0 ) {
+				CheckGLError( GLEXT_glBufferSubData( GLEXT_GL_ELEMENT_ARRAY_BUFFER, 0, static_cast<int>( m_index_data.size() * sizeof( GLuint ) ), m_index_data.data() ) );
 			}
+
+			CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ELEMENT_ARRAY_BUFFER, 0 ) );
 		}
 	}
+
+	CheckGLError( GLEXT_glBindBuffer( GLEXT_GL_ARRAY_BUFFER, 0 ) );
 
 	m_vbo_sync_type = 0;
 }
@@ -535,7 +610,7 @@ void VertexBufferRenderer::InvalidateVBO( unsigned char datasets ) {
 	m_vbo_synced = false;
 }
 
-void VertexBufferRenderer::SetupFBO( unsigned int width, unsigned int height ) {
+void VertexBufferRenderer::SetupFBO( int width, int height ) {
 	if( !m_use_fbo || !width || !height ) {
 		DestroyFBO();
 
@@ -544,32 +619,31 @@ void VertexBufferRenderer::SetupFBO( unsigned int width, unsigned int height ) {
 
 	// Create FBO.
 	if( !m_frame_buffer ) {
-		GLEXT_glGenFramebuffers( 1, &m_frame_buffer );
+		CheckGLError( GLEXT_glGenFramebuffers( 1, &m_frame_buffer ) );
 	}
 
-	GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, m_frame_buffer );
+	CheckGLError( GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, m_frame_buffer ) );
 
 	// Create FBO texture object.
 	if( !m_frame_buffer_texture ) {
-		glGenTextures( 1, &m_frame_buffer_texture );
+		CheckGLError( glGenTextures( 1, &m_frame_buffer_texture ) );
 	}
 
-	glBindTexture( GL_TEXTURE_2D, m_frame_buffer_texture );
+	CheckGLError( glBindTexture( GL_TEXTURE_2D, m_frame_buffer_texture ) );
 
-	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST );
-	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST );
-	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-	glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );
-	glTexParameteri( GL_TEXTURE_2D, GL_GENERATE_MIPMAP, GL_FALSE );
+	CheckGLError( glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST ) );
+	CheckGLError( glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST ) );
+	CheckGLError( glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE ) );
+	CheckGLError( glTexParameterf( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE ) );
 
-	glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0 );
+	CheckGLError( glTexImage2D( GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0 ) );
 
-	glBindTexture( GL_TEXTURE_2D, 0 );
+	CheckGLError( glBindTexture( GL_TEXTURE_2D, 0 ) );
 
-	GLEXT_glFramebufferTexture2D( GLEXT_GL_FRAMEBUFFER, GLEXT_GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_frame_buffer_texture, 0 );
+	CheckGLError( GLEXT_glFramebufferTexture2D( GLEXT_GL_FRAMEBUFFER, GLEXT_GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_frame_buffer_texture, 0 ) );
 
 	// Sanity check.
-	auto status = GLEXT_glCheckFramebufferStatus( GLEXT_GL_FRAMEBUFFER );
+	auto status = CheckGLError( GLEXT_glCheckFramebufferStatus( GLEXT_GL_FRAMEBUFFER ) );
 
 	if( status != GLEXT_GL_FRAMEBUFFER_COMPLETE ) {
 #if defined( SFGUI_DEBUG )
@@ -582,56 +656,56 @@ void VertexBufferRenderer::SetupFBO( unsigned int width, unsigned int height ) {
 		m_use_fbo = false;
 	}
 
-	GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, 0 );
+	CheckGLError( GLEXT_glBindFramebuffer( GLEXT_GL_FRAMEBUFFER, 0 ) );
 
 	if( m_use_fbo && !m_display_list ) {
 		m_display_list = glGenLists( 1 );
 
 		// Do not fear the immediate-mode GL here, we only compile this once.
-		glNewList( m_display_list, GL_COMPILE );
+		CheckGLError( glNewList( m_display_list, GL_COMPILE ) );
 
-		glMatrixMode( GL_PROJECTION );
-		glPushMatrix();
-		glLoadIdentity();
+		CheckGLError( glMatrixMode( GL_PROJECTION ) );
+		CheckGLError( glPushMatrix() );
+		CheckGLError( glLoadIdentity() );
 
-		glBindTexture( GL_TEXTURE_2D, m_frame_buffer_texture );
+		CheckGLError( glBindTexture( GL_TEXTURE_2D, m_frame_buffer_texture ) );
 
 		// Hard to believe, but GL_TRIANGLE_STRIP performs better
 		// in my tests than GL_QUADS, it seems cards might
 		// not always optimize by themselves after all.
-		glBegin( GL_TRIANGLE_STRIP );
-		glTexCoord2s( 1, 1 );
-		glVertex2s( 1, 1 );
-		glTexCoord2s( 0, 1 );
-		glVertex2s( -1, 1 );
-		glTexCoord2s( 1, 0 );
-		glVertex2s( 1, -1 );
-		glTexCoord2s( 0, 0 );
-		glVertex2s( -1, -1 );
-		glEnd();
+		CheckGLError( glBegin( GL_TRIANGLE_STRIP ) );
+		CheckGLError( glTexCoord2s( 1, 1 ) );
+		CheckGLError( glVertex2s( 1, 1 ) );
+		CheckGLError( glTexCoord2s( 0, 1 ) );
+		CheckGLError( glVertex2s( -1, 1 ) );
+		CheckGLError( glTexCoord2s( 1, 0 ) );
+		CheckGLError( glVertex2s( 1, -1 ) );
+		CheckGLError( glTexCoord2s( 0, 0 ) );
+		CheckGLError( glVertex2s( -1, -1 ) );
+		CheckGLError( glEnd() );
 
-		glBindTexture( GL_TEXTURE_2D, 0 );
+		CheckGLError( glBindTexture( GL_TEXTURE_2D, 0 ) );
 
-		glPopMatrix();
-		glMatrixMode( GL_TEXTURE );
+		CheckGLError( glPopMatrix() );
+		CheckGLError( glMatrixMode( GL_TEXTURE ) );
 
-		glEndList();
+		CheckGLError( glEndList() );
 	}
 }
 
 void VertexBufferRenderer::DestroyFBO() {
 	if( m_display_list ) {
-		glDeleteLists( m_display_list, 1 );
+		CheckGLError( glDeleteLists( m_display_list, 1 ) );
 	}
 
 	if( m_frame_buffer_texture ) {
-		glDeleteTextures( 1, &m_frame_buffer_texture );
+		CheckGLError( glDeleteTextures( 1, &m_frame_buffer_texture ) );
 
 		m_frame_buffer_texture = 0;
 	}
 
 	if( m_frame_buffer ) {
-		GLEXT_glDeleteFramebuffers( 1, &m_frame_buffer );
+		CheckGLError( GLEXT_glDeleteFramebuffers( 1, &m_frame_buffer ) );
 
 		m_frame_buffer = 0;
 	}
@@ -664,10 +738,6 @@ void VertexBufferRenderer::TuneUseFBO( bool enable ) {
 
 void VertexBufferRenderer::InvalidateImpl( unsigned char datasets ) {
 	InvalidateVBO( datasets );
-}
-
-void VertexBufferRenderer::InvalidateWindow() {
-	SetupFBO( m_window_size.x, m_window_size.y );
 }
 
 }

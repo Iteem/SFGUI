@@ -1,7 +1,9 @@
 #include <SFGUI/Scale.hpp>
+#include <SFGUI/Adjustment.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Engine.hpp>
-#include <SFGUI/Engines/BREW.hpp>
+
 #include <limits>
 
 namespace sfg {
@@ -13,11 +15,14 @@ Scale::Scale( Orientation orientation ) :
 }
 
 Scale::Ptr Scale::Create( Orientation orientation ) {
-	return Ptr( new Scale( orientation ) );
+	Ptr ptr( new Scale( orientation ) );
+	ptr->SetAdjustment( Adjustment::Create() );
+	return ptr;
 }
 
 Scale::Ptr Scale::Create( float min, float max, float step, Orientation orientation ) {
 	Ptr ptr( new Scale( orientation ) );
+	ptr->SetAdjustment( Adjustment::Create() );
 	ptr->SetRange( min, max );
 	ptr->SetIncrements( step, 0.f );
 	return ptr;

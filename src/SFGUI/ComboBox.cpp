@@ -2,8 +2,12 @@
 #include <SFGUI/Context.hpp>
 #include <SFGUI/Engine.hpp>
 #include <SFGUI/Renderer.hpp>
+#include <SFGUI/Scrollbar.hpp>
+#include <SFGUI/Adjustment.hpp>
+#include <SFGUI/RenderQueue.hpp>
 
-#include <limits>
+#include <SFML/System/String.hpp>
+#include <SFML/Window/Event.hpp>
 
 namespace sfg {
 
@@ -11,11 +15,18 @@ namespace sfg {
 Signal::SignalID ComboBox::OnSelect = 0;
 Signal::SignalID ComboBox::OnOpen = 0;
 
-const ComboBox::IndexType ComboBox::NONE = std::numeric_limits<ComboBox::IndexType>::max();
+const ComboBox::IndexType ComboBox::NONE = -1;
 static const sf::String EMPTY = "";
 
+ComboBox::ConstIterator begin( const ComboBox& combo_box ) {
+	return combo_box.Begin();
+}
+
+ComboBox::ConstIterator end( const ComboBox& combo_box ) {
+	return combo_box.End();
+}
+
 ComboBox::ComboBox() :
-	m_active( false ),
 	m_active_item( NONE ),
 	m_highlighted_item( NONE ),
 	m_start_entry( 0 )
@@ -39,7 +50,7 @@ ComboBox::IndexType ComboBox::GetHighlightedItem() const {
 }
 
 void ComboBox::SelectItem( IndexType index ) {
-	if( index >= m_entries.size() ) {
+	if( index >= static_cast<IndexType>( m_entries.size() ) || index < 0 ) {
 		return;
 	}
 
@@ -95,11 +106,11 @@ void ComboBox::PrependItem( const sf::String& text ) {
 }
 
 void ComboBox::ChangeItem( IndexType index, const sf::String& text ) {
-	if( index >= m_entries.size() ) {
+	if( index >= static_cast<IndexType>( m_entries.size() ) || index < 0 ) {
 		return;
 	}
 
-	m_entries[index] = text;
+	m_entries[static_cast<std::size_t>( index )] = text;
 
 	if( IsMouseInWidget() ) {
 		SetState( State::PRELIGHT );
@@ -108,11 +119,11 @@ void ComboBox::ChangeItem( IndexType index, const sf::String& text ) {
 		SetState( State::NORMAL );
 	}
 
-	RequestResize();
+	Invalidate();
 }
 
 void ComboBox::RemoveItem( IndexType index ) {
-	if( index >= m_entries.size() ) {
+	if( index >= static_cast<IndexType>( m_entries.size() ) || index < 0 ) {
 		return;
 	}
 
@@ -124,7 +135,7 @@ void ComboBox::RemoveItem( IndexType index ) {
 			m_active_item = NONE;
 		}
 		else if( m_active_item > index ) {
-			m_active_item = m_entries.size() == 0 ? NONE : m_active_item - 1;
+			m_active_item = m_entries.empty() ? NONE : m_active_item - 1;
 		}
 	}
 
@@ -135,7 +146,31 @@ void ComboBox::RemoveItem( IndexType index ) {
 		SetState( State::NORMAL );
 	}
 
-	RequestResize();
+	Invalidate();
+}
+
+void ComboBox::Clear() {
+	if( m_entries.empty() ) {
+		return;
+	}
+
+	m_entries.clear();
+
+	m_active_item = NONE;
+
+	SetState( State::NORMAL );
+
+	Invalidate();
+}
+
+ComboBox::ConstIterator ComboBox::Begin() const {
+	// TODO: No std::cbegin in C++11 yet.
+	return std::begin( m_entries );
+}
+
+ComboBox::ConstIterator ComboBox::End() const {
+	// TODO: No std::cend in C++11 yet.
+	return std::end( m_entries );
 }
 
 const sf::String& ComboBox::GetSelectedText() const {
@@ -143,23 +178,23 @@ const sf::String& ComboBox::GetSelectedText() const {
 		return EMPTY;
 	}
 
-	return m_entries[m_active_item];
+	return m_entries[static_cast<std::size_t>( m_active_item )];
 }
 
 ComboBox::IndexType ComboBox::GetItemCount() const {
-	return m_entries.size();
+	return static_cast<IndexType>( m_entries.size() );
 }
 
 const sf::String& ComboBox::GetItem( IndexType index ) const {
-	if( index >= m_entries.size() ) {
+	if( index >= static_cast<IndexType>( m_entries.size() ) || index < 0 ) {
 		return EMPTY;
 	}
 
-	return m_entries[index];
+	return m_entries[static_cast<std::size_t>( index )];
 }
 
-bool ComboBox::IsPoppedUp() const {
-	return m_active;
+bool ComboBox::IsDropDownDisplayed() const {
+	return GetState() == State::ACTIVE;
 }
 
 void ComboBox::HandleMouseEnter( int /*x*/, int /*y*/ ) {
@@ -175,7 +210,11 @@ void ComboBox::HandleMouseLeave( int /*x*/, int /*y*/ ) {
 }
 
 void ComboBox::HandleMouseMoveEvent( int x, int y ) {
-	if( m_active ) {
+	if( ( x == std::numeric_limits<int>::min() ) || ( y == std::numeric_limits<int>::min() ) ) {
+		return;
+	}
+
+	if( GetState() == State::ACTIVE ) {
 		if( m_scrollbar ) {
 			sf::Event event;
 
@@ -211,10 +250,10 @@ void ComboBox::HandleMouseMoveEvent( int x, int y ) {
 			line_y -= static_cast<int>( GetAllocation().top + GetAllocation().height + padding );
 			line_y /= static_cast<int>( Context::Get().GetEngine().GetFontLineHeight( font, font_size ) + 2 * padding );
 
-			if( line_y < static_cast<int>( GetItemCount() ) ) {
+			if( ( line_y < static_cast<int>( GetItemCount() ) ) && ( line_y >= 0 ) ) {
 				if( line_y != static_cast<int>( m_highlighted_item ) ) {
 					Invalidate();
-					m_highlighted_item = line_y + GetStartItemIndex();
+					m_highlighted_item = line_y + GetDisplayedItemStart();
 				}
 			}
 			else {
@@ -234,6 +273,10 @@ void ComboBox::HandleMouseMoveEvent( int x, int y ) {
 }
 
 void ComboBox::HandleMouseButtonEvent( sf::Mouse::Button button, bool press, int x, int y ) {
+	if( ( x == std::numeric_limits<int>::min() ) || ( y == std::numeric_limits<int>::min() ) ) {
+		return;
+	}
+
 	if( GetState() == State::ACTIVE ) {
 		if( m_scrollbar ) {
 			sf::Event event;
@@ -262,11 +305,11 @@ void ComboBox::HandleMouseButtonEvent( sf::Mouse::Button button, bool press, int
 			return;
 		}
 
-		m_active = false;
+		auto emit_select = false;
 
 		if( ( m_highlighted_item != NONE ) && ( m_active_item != m_highlighted_item ) ) {
 			m_active_item = m_highlighted_item;
-			GetSignals().Emit( OnSelect );
+			emit_select = true;
 		}
 
 		m_highlighted_item = NONE;
@@ -280,18 +323,20 @@ void ComboBox::HandleMouseButtonEvent( sf::Mouse::Button button, bool press, int
 
 		Invalidate();
 
+		if( emit_select ) {
+			GetSignals().Emit( OnSelect );
+		}
+
 		return;
 	}
 
 	if( press && ( button == sf::Mouse::Left ) && IsMouseInWidget() ) {
-		m_active = true;
 		m_highlighted_item = NONE;
 
 		SetState( State::ACTIVE );
 
-		GetSignals().Emit( OnOpen );
-
 		Invalidate();
+		GetSignals().Emit( OnOpen );
 	}
 }
 
@@ -304,7 +349,7 @@ sf::Vector2f ComboBox::CalculateRequisition() {
 	// Determine highest needed width of all items.
 	sf::Vector2f metrics( 0.f, 0.f );
 	for ( IndexType item = 0; item < GetItemCount(); ++item ) {
-		metrics.x = std::max( metrics.x, Context::Get().GetEngine().GetTextMetrics( m_entries.at( item ), font, font_size ).x );
+		metrics.x = std::max( metrics.x, Context::Get().GetEngine().GetTextStringMetrics( m_entries[static_cast<std::size_t>( item )], font, font_size ).x );
 	}
 
 	metrics.y = Context::Get().GetEngine().GetFontLineHeight( font, font_size );
@@ -341,7 +386,7 @@ void ComboBox::HandleStateChange( State old_state ) {
 		const sf::Font& font( *Context::Get().GetEngine().GetResourceManager().GetFont( font_name ) );
 		const float line_height( Context::Get().GetEngine().GetFontLineHeight( font, font_size ) );
 
-		if( ( GetDisplayedItems() > 2 ) && ( GetDisplayedItems() < GetItemCount() ) ) {
+		if( ( GetDisplayedItemCount() > 2 ) && ( GetDisplayedItemCount() < GetItemCount() ) ) {
 			float border_width( Context::Get().GetEngine().GetProperty<float>( "BorderWidth", shared_from_this() ) );
 
 
@@ -355,15 +400,31 @@ void ComboBox::HandleStateChange( State old_state ) {
 			auto offset = ( GetState() == State::ACTIVE ? border_width : 0.f ) + GetAllocation().width - padding - line_height;
 
 			m_scrollbar->SetPosition( sf::Vector2f( offset, GetAllocation().height + border_width ) );
-			m_scrollbar->SetRequisition( sf::Vector2f( GetAllocation().width - offset, static_cast<float>( GetDisplayedItems() ) * item_size.y - 2.f * border_width ) );
+			m_scrollbar->SetRequisition( sf::Vector2f( GetAllocation().width - offset, static_cast<float>( GetDisplayedItemCount() ) * item_size.y - 2.f * border_width ) );
 
-			m_scrollbar->GetAdjustment()->SetPageSize( static_cast<float>( GetDisplayedItems() ) );
+			m_scrollbar->GetAdjustment()->SetPageSize( static_cast<float>( GetDisplayedItemCount() ) );
 			m_scrollbar->GetAdjustment()->SetLower( 0.f );
 			m_scrollbar->GetAdjustment()->SetUpper( static_cast<float>( GetItemCount() ) );
 			m_scrollbar->GetAdjustment()->SetMinorStep( 1.f );
 			m_scrollbar->GetAdjustment()->SetMajorStep( 1.f );
 
-			m_scrollbar->GetAdjustment()->GetSignal( Adjustment::OnChange ).Connect( std::bind( &ComboBox::ChangeStartEntry, this ) );
+			auto weak_this = std::weak_ptr<Widget>( shared_from_this() );
+
+			m_scrollbar->GetAdjustment()->GetSignal( Adjustment::OnChange ).Connect( [weak_this] {
+				auto shared_this = weak_this.lock();
+
+				if( !shared_this ) {
+					return;
+				}
+
+				auto combo_box = std::dynamic_pointer_cast<ComboBox>( shared_this );
+
+				if( !combo_box ) {
+					return;
+				}
+
+				combo_box->ChangeStartEntry();
+			} );
 
 			m_scrollbar->SetZOrder( 2 );
 
@@ -378,10 +439,12 @@ void ComboBox::HandleStateChange( State old_state ) {
 
 			m_scrollbar.reset();
 		}
+
+		m_start_entry = 0;
 	}
 }
 
-ComboBox::IndexType ComboBox::GetDisplayedItems() const {
+ComboBox::IndexType ComboBox::GetDisplayedItemCount() const {
 	float border_width( Context::Get().GetEngine().GetProperty<float>( "BorderWidth", shared_from_this() ) );
 	float padding( Context::Get().GetEngine().GetProperty<float>( "ItemPadding", shared_from_this() ) );
 	const std::string& font_name( Context::Get().GetEngine().GetProperty<std::string>( "FontName", shared_from_this() ) );
@@ -403,7 +466,7 @@ ComboBox::IndexType ComboBox::GetDisplayedItems() const {
 	return num_displayed_entries;
 }
 
-ComboBox::IndexType ComboBox::GetStartItemIndex() const {
+ComboBox::IndexType ComboBox::GetDisplayedItemStart() const {
 	return m_start_entry;
 }
 

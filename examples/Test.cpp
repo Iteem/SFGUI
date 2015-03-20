@@ -1,10 +1,10 @@
 #include <SFGUI/SFGUI.hpp>
-#include <SFGUI/Engines/BREW.hpp>
-#include <SFGUI/Renderers/VertexBufferRenderer.hpp>
-#include <SFGUI/Renderers/VertexArrayRenderer.hpp>
+#include <SFGUI/Widgets.hpp>
+#include <SFGUI/Renderers.hpp>
 
 #include <SFML/Graphics.hpp>
 #include <SFML/System/Clock.hpp>
+#include <SFML/OpenGL.hpp>
 #include <sstream>
 #include <cmath>
 #include <memory>
@@ -50,6 +50,7 @@ class SampleApp {
 		sfg::Image::Ptr m_image;
 		sfg::Canvas::Ptr m_gl_canvas;
 		sfg::Canvas::Ptr m_sfml_canvas;
+		sfg::Button::Ptr m_switch_renderer;
 
 		sfg::Desktop m_desktop;
 
@@ -143,16 +144,56 @@ void SampleApp::Run() {
 	//m_window.SetFramerateLimit( 60 );
 	//m_window.EnableVerticalSync( true );
 
+	std::string renderer_string;
+
 	// Tune Renderer
+	if( m_sfgui.GetRenderer().GetName() == "Non-Legacy Renderer" ) {
+		static_cast<sfg::NonLegacyRenderer*>( &m_sfgui.GetRenderer() )->TuneUseFBO( true );
+		static_cast<sfg::NonLegacyRenderer*>( &m_sfgui.GetRenderer() )->TuneCull( true );
+
+		renderer_string = "NLR";
+	}
 	if( m_sfgui.GetRenderer().GetName() == "Vertex Buffer Renderer" ) {
 		static_cast<sfg::VertexBufferRenderer*>( &m_sfgui.GetRenderer() )->TuneUseFBO( true );
 		static_cast<sfg::VertexBufferRenderer*>( &m_sfgui.GetRenderer() )->TuneAlphaThreshold( .2f );
 		static_cast<sfg::VertexBufferRenderer*>( &m_sfgui.GetRenderer() )->TuneCull( true );
+
+		renderer_string = "VBR";
 	}
 	else if( m_sfgui.GetRenderer().GetName() == "Vertex Array Renderer" ) {
 		static_cast<sfg::VertexArrayRenderer*>( &m_sfgui.GetRenderer() )->TuneAlphaThreshold( .2f );
 		static_cast<sfg::VertexArrayRenderer*>( &m_sfgui.GetRenderer() )->TuneCull( true );
+
+		renderer_string = "VAR";
 	}
+
+	// Play around with resource manager.
+	std::shared_ptr<sf::Font> my_font = std::make_shared<sf::Font>();
+	my_font->loadFromFile( "data/linden_hill.otf" );
+	m_desktop.GetEngine().GetResourceManager().AddFont( "custom_font", my_font );
+
+	// Set properties.
+	// Multiple properties can be set at once to save calls.
+
+	// m_desktop.SetProperty( "Button#close:Normal", "Color", sf::Color::Yellow );
+	// #close is sufficient since there is only 1 widget with this id
+	// m_desktop.SetProperty( "#close", "FontName", "data/linden_hill.otf" );
+	// m_desktop.SetProperty( "#close", "FontSize", 15.f );
+
+	// We will batch the above properties into this call.
+	m_desktop.SetProperties(
+		"Window#second_window > Box > Label {"
+		"	FontName: custom_font;"
+		"	FontSize: 18;"
+		"}"
+		"Button#close:Normal {"
+		"	Color: #FFFF00FF;"
+		"}"
+		"#close {"
+		"	FontName: data/linden_hill.otf;"
+		"	FontSize: 15;"
+		"}"
+	);
 
 	// Create widgets.
 	m_wndmain = sfg::Window::Create( sfg::Window::Style::TITLEBAR | sfg::Window::Style::BACKGROUND | sfg::Window::Style::RESIZE );
@@ -283,9 +324,9 @@ void SampleApp::Run() {
 
 	boxtoolbar2->Pack( m_combo_box, true );
 
-	auto switch_renderer = sfg::Button::Create( "Switch Renderer" );
+	m_switch_renderer = sfg::Button::Create( "Renderer: " + renderer_string );
 
-	boxtoolbar2->Pack( switch_renderer, false );
+	boxtoolbar2->Pack( m_switch_renderer, false );
 
 	auto frame2 = sfg::Frame::Create( L"Toolbar 2" );
 	frame2->Add( boxtoolbar2 );
@@ -408,7 +449,7 @@ void SampleApp::Run() {
 	m_scale->GetAdjustment()->GetSignal( sfg::Adjustment::OnChange ).Connect( std::bind( &SampleApp::OnAdjustmentChange, this ) );
 	spinner_toggle->GetSignal( sfg::Widget::OnLeftClick ).Connect( std::bind( &SampleApp::OnToggleSpinner, this ) );
 	mirror_image->GetSignal( sfg::Widget::OnLeftClick ).Connect( std::bind( &SampleApp::OnMirrorImageClick, this ) );
-	switch_renderer->GetSignal( sfg::Widget::OnLeftClick ).Connect( std::bind( &SampleApp::OnSwitchRendererClick, this ) );
+	m_switch_renderer->GetSignal( sfg::Widget::OnLeftClick ).Connect( std::bind( &SampleApp::OnSwitchRendererClick, this ) );
 
 	spinbutton->SetValue( 20.f );
 	spinbutton->GetAdjustment()->SetMinorStep( .8f );
@@ -471,25 +512,6 @@ void SampleApp::Run() {
 	// Add window to desktop
 	m_desktop.Add( m_wndmain );
 
-	// Play around with resource manager.
-	std::shared_ptr<sf::Font> my_font = std::make_shared<sf::Font>();
-	my_font->loadFromFile( "data/linden_hill.otf" );
-	m_desktop.GetEngine().GetResourceManager().AddFont( "custom_font", my_font );
-
-	// Set properties.
-	m_desktop.SetProperty( "Button#close:Normal", "Color", sf::Color::Yellow );
-	// #close is sufficient since there is only 1 widget with this id
-	m_desktop.SetProperty( "#close", "FontName", "data/linden_hill.otf" );
-	m_desktop.SetProperty( "#close", "FontSize", 15.f );
-
-	// Multiple properties can be set at once to save calls.
-	m_desktop.SetProperties(
-		"Window#second_window > Box > Label {"
-		"	FontName: custom_font;"
-		"	FontSize: 18;"
-		"}"
-	);
-
 	m_fps_counter = 0;
 	m_fps_clock.restart();
 
@@ -498,6 +520,10 @@ void SampleApp::Run() {
 
 	sf::Int64 frame_times[5000];
 	std::size_t frame_times_index = 0;
+
+	std::fill( std::begin( frame_times ), std::end( frame_times ), 0 );
+
+	m_desktop.Update( 0.f );
 
 	while( m_window.isOpen() ) {
 		while( m_window.pollEvent( event ) ) {
@@ -651,25 +677,60 @@ void SampleApp::OnMirrorImageClick() {
 }
 
 void SampleApp::OnSwitchRendererClick() {
-	if( ( sfg::Renderer::Get().GetName() == "Vertex Array Renderer" ) && sfg::VertexBufferRenderer::IsAvailable() ) {
-		std::shared_ptr<sfg::VertexBufferRenderer> renderer( new sfg::VertexBufferRenderer );
+	if( sfg::Renderer::Get().GetName() == "Non-Legacy Renderer" ) {
+		auto renderer = sfg::VertexBufferRenderer::Create();
 
 		sfg::Renderer::Set( renderer );
 
 		renderer->TuneUseFBO( true );
 		renderer->TuneAlphaThreshold( .2f );
 		renderer->TuneCull( true );
+
+		m_switch_renderer->SetLabel( "Renderer: VBR" );
+
+		m_desktop.Refresh();
+		return;
 	}
-	else {
-		std::shared_ptr<sfg::VertexArrayRenderer> renderer( new sfg::VertexArrayRenderer );
+
+	if( sfg::Renderer::Get().GetName() == "Vertex Buffer Renderer" ) {
+		auto renderer = sfg::VertexArrayRenderer::Create();
 
 		sfg::Renderer::Set( renderer );
 
 		renderer->TuneAlphaThreshold( .2f );
 		renderer->TuneCull( true );
+
+		m_switch_renderer->SetLabel( "Renderer: VAR" );
+
+		m_desktop.Refresh();
+		return;
 	}
 
-	m_desktop.Refresh();
+	if( sfg::NonLegacyRenderer::IsAvailable() ) {
+		auto renderer = sfg::NonLegacyRenderer::Create();
+
+		sfg::Renderer::Set( renderer );
+
+		renderer->TuneUseFBO( true );
+		renderer->TuneCull( true );
+
+		m_switch_renderer->SetLabel( "Renderer: NLR" );
+
+		m_desktop.Refresh();
+	}
+	else if( sfg::VertexBufferRenderer::IsAvailable() ) {
+		auto renderer = sfg::VertexBufferRenderer::Create();
+
+		sfg::Renderer::Set( renderer );
+
+		renderer->TuneUseFBO( true );
+		renderer->TuneAlphaThreshold( .2f );
+		renderer->TuneCull( true );
+
+		m_switch_renderer->SetLabel( "Renderer: VBR" );
+
+		m_desktop.Refresh();
+	}
 }
 
 void SampleApp::RenderCustomGL() {
@@ -701,8 +762,17 @@ void SampleApp::RenderCustomGL() {
 		glPushMatrix();
 		glLoadIdentity();
 
+		static const auto pi = 3.1415926535897932384626433832795f;
+		static const auto fov = 90.f;
+		static const auto near_distance = 1.f;
+		static const auto far_distance = 20.f;
+
 		// We set the proper aspect ratio using the dimensions of our Canvas.
-		gluPerspective( 90.f, m_gl_canvas->GetAllocation().width / m_gl_canvas->GetAllocation().height, 1.f, 20.f );
+		auto aspect = m_gl_canvas->GetAllocation().width / m_gl_canvas->GetAllocation().height;
+		auto frustum_height = std::tan( fov / 360 * pi ) * near_distance;
+		auto frustum_width = frustum_height * aspect;
+
+		glFrustum( -frustum_width, frustum_width, -frustum_height, frustum_height, near_distance, far_distance );
 
 		glBegin( GL_QUADS );
 
@@ -757,7 +827,7 @@ void SampleApp::RenderCustomGL() {
 	glMatrixMode( GL_MODELVIEW );
 	glPopMatrix();
 
-	glViewport( 0, 0, m_window.getSize().x, m_window.getSize().y );
+	glViewport( 0, 0, static_cast<int>( m_window.getSize().x ), static_cast<int>( m_window.getSize().y ) );
 }
 
 void SampleApp::RenderCustomSFML() {

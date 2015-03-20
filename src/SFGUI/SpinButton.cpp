@@ -1,7 +1,8 @@
 #include <SFGUI/SpinButton.hpp>
+#include <SFGUI/Adjustment.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Engine.hpp>
-#include <SFGUI/Engines/BREW.hpp>
 
 #include <SFML/Graphics/Font.hpp>
 #include <cmath>
@@ -13,22 +14,23 @@ namespace sfg {
 // Signals.
 Signal::SignalID SpinButton::OnValueChanged = 0;
 
-SpinButton::SpinButton( Adjustment::Ptr adjustment ) :
-	m_adjustment( adjustment ),
+SpinButton::SpinButton() :
 	m_elapsed_time( 0.f ),
 	m_digits( 0 ),
 	m_decrease_pressed( false ),
 	m_increase_pressed( false ),
 	m_repeat_wait( true )
 {
-	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( std::bind( &SpinButton::UpdateTextFromAdjustment, this ) );
 }
 
 SpinButton::Ptr SpinButton::Create( float minimum, float maximum, float step ) {
 	auto adjustment = Adjustment::Create();
 	adjustment->Configure( minimum, minimum, maximum, step, 0.f, 0.f );
 
-	return Ptr( new SpinButton( adjustment ) );
+	auto ptr = Ptr( new SpinButton );
+	ptr->SetAdjustment( adjustment );
+
+	return ptr;
 }
 
 SpinButton::Ptr SpinButton::Create( Adjustment::Ptr adjustment ) {
@@ -36,7 +38,10 @@ SpinButton::Ptr SpinButton::Create( Adjustment::Ptr adjustment ) {
 		return Create( 0.f, 0.f, 0.f );
 	}
 
-	return Ptr( new SpinButton( adjustment ) );
+	auto ptr = Ptr( new SpinButton );
+	ptr->SetAdjustment( adjustment );
+
+	return ptr;
 }
 
 std::unique_ptr<RenderQueue> SpinButton::InvalidateImpl() const {
@@ -162,7 +167,7 @@ void SpinButton::HandleUpdate( float seconds ) {
 }
 
 void SpinButton::HandleTextEvent( sf::Uint32 character ) {
-	if( isdigit( character ) ) {
+	if( isdigit( static_cast<int>( character ) ) ) {
 		Entry::HandleTextEvent( character );
 		return;
 	}
@@ -217,9 +222,29 @@ void SpinButton::SetAdjustment( Adjustment::Ptr adjustment ) {
 		return;
 	}
 
-	m_adjustment->GetSignal( Adjustment::OnChange ).Disconnect( m_adjustment_signal_serial );
+	if( m_adjustment ) {
+		m_adjustment->GetSignal( Adjustment::OnChange ).Disconnect( m_adjustment_signal_serial );
+	}
+
 	m_adjustment = adjustment;
-	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( std::bind( &SpinButton::UpdateTextFromAdjustment, this ) );
+
+	auto weak_this = std::weak_ptr<Widget>( shared_from_this() );
+
+	m_adjustment_signal_serial = m_adjustment->GetSignal( Adjustment::OnChange ).Connect( [weak_this] {
+		auto shared_this = weak_this.lock();
+
+		if( !shared_this ) {
+			return;
+		}
+
+		auto spin_button = std::dynamic_pointer_cast<SpinButton>( shared_this );
+
+		if( !spin_button ) {
+			return;
+		}
+
+		spin_button->UpdateTextFromAdjustment();
+	} );
 
 	UpdateTextFromAdjustment();
 }
@@ -268,8 +293,8 @@ void SpinButton::Configure( Adjustment::Ptr adjustment, float step, unsigned int
 }
 
 void SpinButton::UpdateTextFromAdjustment() {
-	std::stringstream sstr;
-	sstr << std::fixed << std::setprecision( m_digits ) << m_adjustment->GetValue();
+	std::ostringstream sstr;
+	sstr << std::fixed << std::setprecision( static_cast<int>( m_digits ) ) << m_adjustment->GetValue();
 	Entry::SetText( sstr.str() );
 
 	GetSignals().Emit( OnValueChanged );
@@ -281,7 +306,7 @@ void SpinButton::UpdateAdjustmentFromText() {
 		return;
 	}
 
-	std::stringstream text( GetText().toAnsiString() );
+	std::istringstream text( GetText().toAnsiString() );
 
 	float value;
 

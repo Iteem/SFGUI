@@ -2,9 +2,23 @@
 #include <SFGUI/Container.hpp>
 #include <SFGUI/Renderer.hpp>
 #include <SFGUI/RendererViewport.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/Primitive.hpp>
+
+#include <SFML/Window/Event.hpp>
 #include <cmath>
 #include <limits>
+
+namespace {
+
+std::weak_ptr<sfg::Widget> focus_widget;
+std::weak_ptr<sfg::Widget> active_widget;
+std::weak_ptr<sfg::Widget> modal_widget;
+
+std::vector<sfg::Widget*> root_widgets;
+
+}
 
 namespace sfg {
 
@@ -33,12 +47,6 @@ Signal::SignalID Widget::OnKeyPress = 0;
 Signal::SignalID Widget::OnKeyRelease = 0;
 Signal::SignalID Widget::OnText = 0;
 
-std::weak_ptr<Widget> Widget::m_focus_widget;
-std::weak_ptr<Widget> Widget::m_active_widget;
-std::weak_ptr<Widget> Widget::m_modal_widget;
-
-std::vector<Widget*> Widget::m_root_widgets;
-
 Widget::Widget() :
 	m_hierarchy_level( 0 ),
 	m_z_order( 0 ),
@@ -52,17 +60,17 @@ Widget::Widget() :
 	m_viewport = Renderer::Get().GetDefaultViewport();
 
 	// Register this as a root widget initially.
-	m_root_widgets.push_back( this );
+	root_widgets.push_back( this );
 }
 
 Widget::~Widget() {
 	if( !m_parent.lock() ) {
 		// If this widget is an orphan, we assume it is
 		// a root widget and try to de-register it.
-		std::vector<Widget*>::iterator iter( std::find( m_root_widgets.begin(), m_root_widgets.end(), this ) );
+		std::vector<Widget*>::iterator iter( std::find( root_widgets.begin(), root_widgets.end(), this ) );
 
-		if( iter != m_root_widgets.end() ) {
-			m_root_widgets.erase( iter );
+		if( iter != root_widgets.end() ) {
+			root_widgets.erase( iter );
 		}
 	}
 }
@@ -92,21 +100,21 @@ bool Widget::IsGloballyVisible() const {
 
 void Widget::GrabFocus( Ptr widget ) {
 	// Notify old focused widget.
-	if( m_focus_widget.lock() ) {
-		m_focus_widget.lock()->GetSignals().Emit( OnLostFocus );
-		m_focus_widget.lock()->HandleFocusChange( widget );
+	if( focus_widget.lock() ) {
+		focus_widget.lock()->GetSignals().Emit( OnLostFocus );
+		focus_widget.lock()->HandleFocusChange( widget );
 	}
 
-	m_focus_widget = widget;
+	focus_widget = widget;
 
-	if( m_focus_widget.lock() ) {
-		m_focus_widget.lock()->GetSignals().Emit( OnGainFocus );
-		m_focus_widget.lock()->HandleFocusChange( widget );
+	if( focus_widget.lock() ) {
+		focus_widget.lock()->GetSignals().Emit( OnGainFocus );
+		focus_widget.lock()->HandleFocusChange( widget );
 	}
 }
 
 bool Widget::HasFocus( PtrConst widget ) {
-	if( m_focus_widget.lock() == widget ) {
+	if( focus_widget.lock() == widget ) {
 		return true;
 	}
 
@@ -244,20 +252,20 @@ void Widget::SetParent( Widget::Ptr parent ) {
 
 	m_parent = cont;
 
-	auto iter = std::find( m_root_widgets.begin(), m_root_widgets.end(), this );
+	auto iter = std::find( root_widgets.begin(), root_widgets.end(), this );
 
 	if( parent ) {
 		// If this widget has a parent, it is no longer a root widget.
-		if( iter != m_root_widgets.end() ) {
-			m_root_widgets.erase( iter );
+		if( iter != root_widgets.end() ) {
+			root_widgets.erase( iter );
 		}
 
 		SetHierarchyLevel( parent->GetHierarchyLevel() + 1 );
 	}
 	else {
 		// If this widget does not have a parent, it becomes a root widget.
-		if( iter == m_root_widgets.end() ) {
-			m_root_widgets.push_back( this );
+		if( iter == root_widgets.end() ) {
+			root_widgets.push_back( this );
 		}
 
 		SetHierarchyLevel( 0 );
@@ -304,122 +312,160 @@ void Widget::HandleEvent( const sf::Event& event ) {
 
 	auto parent = m_parent.lock();
 
-	switch( event.type ) {
-		case sf::Event::MouseLeft:
-			if( IsMouseInWidget() ) {
-				SetMouseInWidget( false );
+	auto emit_leave = false;
+	auto emit_enter = false;
+	auto emit_move = false;
+	auto emit_left_click = false;
+	auto emit_right_click = false;
 
-				GetSignals().Emit( OnMouseLeave );
-				HandleMouseLeave( std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
-			}
-
-			HandleMouseMoveEvent( std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
-
-			SetMouseButtonDown();
-			HandleMouseButtonEvent( sf::Mouse::Left, false, std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
-			HandleMouseButtonEvent( sf::Mouse::Right, false, std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
-
-			break;
-
-		case sf::Event::MouseMoved:
-			// Check if pointer inside of widget's allocation.
-			if( GetAllocation().contains( static_cast<float>( event.mouseMove.x ), static_cast<float>( event.mouseMove.y ) ) ) {
-				// Check for enter event.
-				if( !IsMouseInWidget() ) {
-					SetMouseInWidget( true );
-
-					GetSignals().Emit( OnMouseEnter );
-					HandleMouseEnter( event.mouseMove.x, event.mouseMove.y );
-				}
-
-				GetSignals().Emit( OnMouseMove );
-			}
-			else if( IsMouseInWidget() ) { // Check for leave event.
-				SetMouseInWidget( false );
-
-				GetSignals().Emit( OnMouseLeave );
-				HandleMouseLeave( event.mouseMove.x, event.mouseMove.y );
-			}
-
-			HandleMouseMoveEvent( event.mouseMove.x, event.mouseMove.y );
-			break;
-
-		case sf::Event::MouseButtonPressed:
-			if( !IsMouseButtonDown() && IsMouseInWidget() ) {
-				SetMouseButtonDown( event.mouseButton.button );
-			}
-
-			HandleMouseButtonEvent( event.mouseButton.button, true, event.mouseButton.x, event.mouseButton.y );
-
-			if( IsMouseInWidget() ) {
-				if( event.mouseButton.button == sf::Mouse::Left ) {
-					GetSignals().Emit( OnMouseLeftPress );
-				}
-				else if( event.mouseButton.button == sf::Mouse::Right ) {
-					GetSignals().Emit( OnMouseRightPress );
-				}
-			}
-
-			break;
-
-		case sf::Event::MouseButtonReleased:
-			// Only process as a click when mouse button has been pressed inside the widget before.
-			if( IsMouseButtonDown( event.mouseButton.button ) ) {
-				SetMouseButtonDown();
-
-				// When released inside the widget, the event can be considered a click.
+	try {
+		switch( event.type ) {
+			case sf::Event::MouseLeft:
 				if( IsMouseInWidget() ) {
-					HandleMouseClick( event.mouseButton.button, event.mouseButton.x, event.mouseButton.y );
+					SetMouseInWidget( false );
 
+					HandleMouseLeave( std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
+
+					emit_leave = true;
+				}
+
+				HandleMouseMoveEvent( std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
+
+				SetMouseButtonDown();
+				HandleMouseButtonEvent( sf::Mouse::Left, false, std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
+				HandleMouseButtonEvent( sf::Mouse::Right, false, std::numeric_limits<int>::min(), std::numeric_limits<int>::min() );
+
+				if( emit_leave ) {
+					GetSignals().Emit( OnMouseLeave );
+				}
+
+				break;
+
+			case sf::Event::MouseMoved:
+				// Check if pointer inside of widget's allocation.
+				if( GetAllocation().contains( static_cast<float>( event.mouseMove.x ), static_cast<float>( event.mouseMove.y ) ) ) {
+					// Check for enter event.
+					if( !IsMouseInWidget() ) {
+						SetMouseInWidget( true );
+
+						emit_enter = true;
+
+						HandleMouseEnter( event.mouseMove.x, event.mouseMove.y );
+					}
+
+					emit_move = true;
+				}
+				else if( IsMouseInWidget() ) { // Check for leave event.
+					SetMouseInWidget( false );
+
+					emit_leave = true;
+
+					HandleMouseLeave( event.mouseMove.x, event.mouseMove.y );
+				}
+
+				HandleMouseMoveEvent( event.mouseMove.x, event.mouseMove.y );
+
+				if( emit_move ) {
+					if( emit_enter ) {
+						GetSignals().Emit( OnMouseEnter );
+					}
+
+					GetSignals().Emit( OnMouseMove );
+				}
+				else if( emit_leave ) {
+					GetSignals().Emit( OnMouseLeave );
+				}
+
+				break;
+
+			case sf::Event::MouseButtonPressed:
+				if( !IsMouseButtonDown() && IsMouseInWidget() ) {
+					SetMouseButtonDown( event.mouseButton.button );
+				}
+
+				HandleMouseButtonEvent( event.mouseButton.button, true, event.mouseButton.x, event.mouseButton.y );
+
+				if( IsMouseInWidget() ) {
 					if( event.mouseButton.button == sf::Mouse::Left ) {
-						GetSignals().Emit( OnLeftClick );
+						GetSignals().Emit( OnMouseLeftPress );
 					}
 					else if( event.mouseButton.button == sf::Mouse::Right ) {
-						GetSignals().Emit( OnRightClick );
+						GetSignals().Emit( OnMouseRightPress );
 					}
 				}
-			}
 
-			HandleMouseButtonEvent( event.mouseButton.button, false, event.mouseButton.x, event.mouseButton.y );
+				break;
 
-			if( IsMouseInWidget() ) {
-				if( event.mouseButton.button == sf::Mouse::Left ) {
-					GetSignals().Emit( OnMouseLeftRelease );
+			case sf::Event::MouseButtonReleased:
+				// Only process as a click when mouse button has been pressed inside the widget before.
+				if( IsMouseButtonDown( event.mouseButton.button ) ) {
+					SetMouseButtonDown();
+
+					// When released inside the widget, the event can be considered a click.
+					if( IsMouseInWidget() ) {
+						HandleMouseClick( event.mouseButton.button, event.mouseButton.x, event.mouseButton.y );
+
+						if( event.mouseButton.button == sf::Mouse::Left ) {
+							emit_left_click = true;
+						}
+						else if( event.mouseButton.button == sf::Mouse::Right ) {
+							emit_right_click = true;
+						}
+					}
 				}
-				else if( event.mouseButton.button == sf::Mouse::Right ) {
-					GetSignals().Emit( OnMouseRightRelease );
+
+				HandleMouseButtonEvent( event.mouseButton.button, false, event.mouseButton.x, event.mouseButton.y );
+
+				if( emit_left_click ) {
+					GetSignals().Emit( OnLeftClick );
 				}
-			}
+				else if( emit_right_click ) {
+					GetSignals().Emit( OnRightClick );
+				}
 
-			break;
+				if( IsMouseInWidget() ) {
+					if( event.mouseButton.button == sf::Mouse::Left ) {
+						GetSignals().Emit( OnMouseLeftRelease );
+					}
+					else if( event.mouseButton.button == sf::Mouse::Right ) {
+						GetSignals().Emit( OnMouseRightRelease );
+					}
+				}
 
-		case sf::Event::KeyPressed:
-			if( HasFocus() ) {
-				// TODO: Delegate event too when widget's not active?
-				HandleKeyEvent( event.key.code, true );
-				GetSignals().Emit( OnKeyPress );
-			}
+				break;
 
-			break;
+			case sf::Event::KeyPressed:
+				if( HasFocus() ) {
+					// TODO: Delegate event too when widget's not active?
+					HandleKeyEvent( event.key.code, true );
+					GetSignals().Emit( OnKeyPress );
+				}
 
-		case sf::Event::KeyReleased:
-			if( HasFocus() ) {
-				// TODO: Delegate event too when widget's not active?
-				HandleKeyEvent( event.key.code, false );
-				GetSignals().Emit( OnKeyRelease );
-			}
-			break;
+				break;
 
-		case sf::Event::TextEntered:
-			if( HasFocus() ) {
-				// TODO: Delegate event too when widget's not active?
-				HandleTextEvent( event.text.unicode );
-				GetSignals().Emit( OnText );
-			}
-			break;
+			case sf::Event::KeyReleased:
+				if( HasFocus() ) {
+					// TODO: Delegate event too when widget's not active?
+					HandleKeyEvent( event.key.code, false );
+					GetSignals().Emit( OnKeyRelease );
+				}
+				break;
 
-		default:
-			break;
+			case sf::Event::TextEntered:
+				if( HasFocus() ) {
+					// TODO: Delegate event too when widget's not active?
+					HandleTextEvent( event.text.unicode );
+					GetSignals().Emit( OnText );
+				}
+				break;
+
+			default:
+				break;
+		}
+	}
+	catch( ... ) {
+		SetState( State::NORMAL );
+		throw;
 	}
 }
 
@@ -434,11 +480,13 @@ void Widget::SetState( State state ) {
 	// Store the new state.
 	m_state = state;
 
+	auto emit_state_change = false;
+
 	// If HandleStateChange() changed the state, do not call observer, will be
 	// done from there too.
 	if( GetState() != old_state ) {
 		HandleStateChange( static_cast<State>( old_state ) );
-		GetSignals().Emit( OnStateChange );
+		emit_state_change = true;
 	}
 
 	if( state == State::ACTIVE ) {
@@ -447,6 +495,10 @@ void Widget::SetState( State state ) {
 	}
 	else if( old_state == State::ACTIVE ) {
 		SetActiveWidget( Ptr() );
+	}
+
+	if( emit_state_change ) {
+		GetSignals().Emit( OnStateChange );
 	}
 }
 
@@ -618,7 +670,7 @@ Widget::Ptr SearchContainerForId( Container::PtrConst container, const std::stri
 }
 
 Widget::Ptr Widget::GetWidgetById( const std::string& id ) {
-	for( const auto& root_widget : m_root_widgets ) {
+	for( const auto& root_widget : root_widgets ) {
 		if( root_widget->GetId() == id ) {
 			return root_widget->shared_from_this();
 		}
@@ -670,7 +722,7 @@ Widget::WidgetsList SearchContainerForClass( Container::PtrConst container, cons
 Widget::WidgetsList Widget::GetWidgetsByClass( const std::string& class_name ) {
 	WidgetsList result;
 
-	for( const auto& root_widget : m_root_widgets ) {
+	for( const auto& root_widget : root_widgets ) {
 		if( root_widget->GetClass() == class_name ) {
 			result.push_back( root_widget->shared_from_this() );
 		}
@@ -756,7 +808,7 @@ void Widget::Refresh() {
 }
 
 void Widget::RefreshAll() {
-	for( const auto& root_widget : m_root_widgets ) {
+	for( const auto& root_widget : root_widgets ) {
 		root_widget->Refresh();
 	}
 }
@@ -816,7 +868,7 @@ void Widget::SetActiveWidget() {
 }
 
 void Widget::SetActiveWidget( Ptr widget ) {
-	m_active_widget = widget;
+	active_widget = widget;
 }
 
 bool Widget::IsActiveWidget() const {
@@ -824,7 +876,7 @@ bool Widget::IsActiveWidget() const {
 }
 
 bool Widget::IsActiveWidget( PtrConst widget ) {
-	if( m_active_widget.lock() == widget ) {
+	if( active_widget.lock() == widget ) {
 		return true;
 	}
 
@@ -832,7 +884,7 @@ bool Widget::IsActiveWidget( PtrConst widget ) {
 }
 
 void Widget::GrabModal() {
-	if( m_modal_widget.lock() ) {
+	if( modal_widget.lock() ) {
 #if defined( SFGUI_DEBUG )
 		std::cerr << "SFGUI warning: Tried to grab modal while existing widget has it.\n";
 #endif
@@ -840,12 +892,12 @@ void Widget::GrabModal() {
 		return;
 	}
 
-	m_modal_widget = shared_from_this();
+	modal_widget = shared_from_this();
 }
 
 void Widget::ReleaseModal() {
-	if( m_modal_widget.lock() == shared_from_this() ) {
-		m_modal_widget.reset();
+	if( modal_widget.lock() == shared_from_this() ) {
+		modal_widget.reset();
 
 		return;
 	}
@@ -856,7 +908,7 @@ void Widget::ReleaseModal() {
 }
 
 bool Widget::IsModal() const {
-	if( m_modal_widget.lock() == shared_from_this() ) {
+	if( modal_widget.lock() == shared_from_this() ) {
 		return true;
 	}
 
@@ -864,11 +916,11 @@ bool Widget::IsModal() const {
 }
 
 bool Widget::HasModal() {
-	return !m_modal_widget.expired();
+	return !modal_widget.expired();
 }
 
 const std::vector<Widget*>& Widget::GetRootWidgets() {
-	return m_root_widgets;
+	return root_widgets;
 }
 
 }

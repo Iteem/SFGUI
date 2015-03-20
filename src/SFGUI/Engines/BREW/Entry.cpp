@@ -1,7 +1,7 @@
 #include <SFGUI/Engines/BREW.hpp>
-#include <SFGUI/Context.hpp>
 #include <SFGUI/Renderer.hpp>
 #include <SFGUI/Entry.hpp>
+#include <SFGUI/RenderQueue.hpp>
 
 #include <SFML/Graphics/Text.hpp>
 
@@ -45,12 +45,12 @@ std::unique_ptr<RenderQueue> BREW::CreateEntryDrawable( std::shared_ptr<const En
 	// Draw cursor if entry is active and cursor is visible.
 	if( entry->HasFocus() && entry->IsCursorVisible() ) {
 		sf::String cursor_string( entry->GetVisibleText() );
-		if( entry->GetCursorPosition() - entry->GetVisibleOffset() < cursor_string.getSize() ) {
-			cursor_string.erase( entry->GetCursorPosition() - entry->GetVisibleOffset(), cursor_string.getSize() );
+		if( entry->GetCursorPosition() - entry->GetVisibleOffset() < static_cast<int>( cursor_string.getSize() ) ) {
+			cursor_string.erase( static_cast<std::size_t>( entry->GetCursorPosition() - entry->GetVisibleOffset() ), cursor_string.getSize() );
 		}
 
 		// Get metrics.
-		sf::Vector2f metrics( GetTextMetrics( cursor_string, *font, font_size ) );
+		sf::Vector2f metrics( GetTextStringMetrics( cursor_string, *font, font_size ) );
 
 		queue->Add(
 			Renderer::Get().CreateRect(

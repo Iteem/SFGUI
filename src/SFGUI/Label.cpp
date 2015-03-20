@@ -1,5 +1,6 @@
 #include <SFGUI/Label.hpp>
 #include <SFGUI/Context.hpp>
+#include <SFGUI/RenderQueue.hpp>
 #include <SFGUI/Engine.hpp>
 
 #include <SFML/Graphics/Font.hpp>
@@ -82,7 +83,7 @@ void Label::WrapText() {
 		line = text.substr( 0, next_newline );
 
 		if( next_newline != std::basic_string<sf::Uint32>::npos ) {
-			text = text.substr( next_newline + 1 );
+			text.erase( 0, next_newline + 1 );
 		}
 		else {
 			text.clear();
@@ -93,7 +94,7 @@ void Label::WrapText() {
 		}
 
 		// Check if line needs to be wrapped.
-		if( Context::Get().GetEngine().GetTextMetrics( line, font, font_size ).x <= GetAllocation().width ) {
+		if( Context::Get().GetEngine().GetTextStringMetrics( line, font, font_size ).x <= GetAllocation().width ) {
 			wrapped_text += line;
 		}
 		else {
@@ -101,7 +102,7 @@ void Label::WrapText() {
 			while( !line.empty() ) {
 				auto last_space = line.size();
 
-				while( Context::Get().GetEngine().GetTextMetrics( line.substr( 0, last_space ), font, font_size ).x > GetAllocation().width ) {
+				while( Context::Get().GetEngine().GetTextStringMetrics( line.substr( 0, last_space ), font, font_size ).x > GetAllocation().width ) {
 					last_space = line.find_last_of( L' ', last_space - 1 );
 
 					if( last_space == std::basic_string<sf::Uint32>::npos ) {
@@ -113,7 +114,7 @@ void Label::WrapText() {
 
 				if( last_space != std::basic_string<sf::Uint32>::npos ) {
 					wrapped_text += line.substr( 0, last_space );
-					line = line.substr( last_space );
+					line.erase( 0, last_space );
 				}
 
 				if( !line.empty() ) {
@@ -121,7 +122,7 @@ void Label::WrapText() {
 
 					// If this is a new line remove the leading space.
 					if( line[0] == L' ' ) {
-						line = line.substr( 1 );
+						line.erase( 0, 1 );
 					}
 				}
 			}
@@ -174,7 +175,7 @@ sf::Vector2f Label::CalculateRequisition() {
 	unsigned int font_size( Context::Get().GetEngine().GetProperty<unsigned int>( "FontSize", shared_from_this() ) );
 	const sf::Font& font( *Context::Get().GetEngine().GetResourceManager().GetFont( font_name ) );
 
-	auto metrics = Context::Get().GetEngine().GetTextMetrics( GetWrappedText(), font, font_size );
+	auto metrics = Context::Get().GetEngine().GetTextStringMetrics( GetWrappedText(), font, font_size );
 	metrics.y = Context::Get().GetEngine().GetFontLineHeight( font, font_size );
 
 	sf::String wrapped_text( GetWrappedText() );
@@ -186,7 +187,7 @@ sf::Vector2f Label::CalculateRequisition() {
 		auto next_newline = text.find( L'\n' );
 
 		if( next_newline != std::basic_string<sf::Uint32>::npos ) {
-			text = text.substr( next_newline + 1 );
+			text.erase( 0, next_newline + 1 );
 		}
 		else {
 			break;

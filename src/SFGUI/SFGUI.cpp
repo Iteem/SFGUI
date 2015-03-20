@@ -1,18 +1,26 @@
 #include <SFGUI/SFGUI.hpp>
+#include <SFGUI/Renderer.hpp>
+#include <SFGUI/Context.hpp>
+
+namespace {
+
+bool alive = false;
+
+}
 
 namespace sfg {
-
-bool SFGUI::m_alive = false;
 
 SFGUI::SFGUI() {
 	Renderer::Create();
 
-	m_alive = true;
+	alive = true;
 }
 
 SFGUI::~SFGUI() {
 	Renderer::Destroy();
 	Context::DestroyDefaultEngine();
+
+	alive = false;
 }
 
 void SFGUI::Display( sf::Window& target ) {
@@ -32,7 +40,7 @@ Renderer& SFGUI::GetRenderer() {
 }
 
 bool SFGUI::IsAlive() {
-	return m_alive;
+	return alive;
 }
 
 }

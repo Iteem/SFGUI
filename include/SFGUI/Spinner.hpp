@@ -1,7 +1,8 @@
 #pragma once
+
 #include <SFGUI/Widget.hpp>
+
 #include <memory>
-#include <SFML/System.hpp>
 
 namespace sfg {
 
@@ -17,7 +18,7 @@ class SFGUI_API Spinner : public Widget {
 		 */
 		static Ptr Create();
 
-		virtual const std::string& GetName() const override;
+		const std::string& GetName() const override;
 
 		/** Start the spinner.
 		 */
